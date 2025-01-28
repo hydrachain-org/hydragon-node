@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 	"net"
+	"strings"
 
 	"github.com/0xPolygon/polygon-edge/chain"
 	"github.com/0xPolygon/polygon-edge/command/server/config"
@@ -15,7 +16,7 @@ import (
 
 const (
 	configFlag                   = "config"
-	genesisPathFlag              = "chain"
+	genesisFlag                  = "chain"
 	dataDirFlag                  = "data-dir"
 	libp2pAddressFlag            = "libp2p"
 	prometheusAddressFlag        = "prometheus"
@@ -67,7 +68,8 @@ var (
 )
 
 var (
-	errInvalidNATAddress = errors.New("could not parse NAT IP address")
+	errInvalidNATAddress      = errors.New("could not parse NAT IP address")
+	errInvalidGenesisFileFlag = errors.New("genesis path must be 'mainnet', 'testnet' or must start with 'custom:'")
 )
 
 type serverParams struct {
@@ -146,6 +148,22 @@ func (p *serverParams) setRawJSONRPCAddress(jsonRPCAddress string) {
 
 func (p *serverParams) setJSONLogFormat(jsonLogFormat bool) {
 	p.rawConfig.JSONLogFormat = jsonLogFormat
+}
+
+func (p *serverParams) setGenesisFileFlag(genesisFlag string) error {
+	if genesisFlag == "mainnet" || genesisFlag == "testnet" {
+		return nil
+	}
+
+	const customPrefix = "custom:"
+	if !strings.HasPrefix(genesisFlag, customPrefix) {
+		return errInvalidGenesisFileFlag
+	}
+
+	actualPath := strings.TrimPrefix(genesisFlag, customPrefix)
+	p.rawConfig.GenesisFile = actualPath
+
+	return nil
 }
 
 func (p *serverParams) generateConfig() *server.Config {

@@ -48,16 +48,16 @@ docker push rsantev/hydra-client:<commit-tag>
 
 Repeat this and push it with the tag `latest`.
 
-4. Build hydragon devnet (or testnet) image
+4. Build hydragon docker compose image
 
 ```
-docker build --platform linux/amd64 -t rsantev/hydragon-devnet:latest ./h_devnet
+docker build --platform linux/amd64 -t rsantev/hydragon-docker:latest ./docker/hydra_docker_compose
 ```
 
-5. Push hydragon devnet image to DockerHub
+5. Push to DockerHub
 
 ```
-docker push rsantev/hydragon-devnet:latest
+docker push rsantev/hydragon-docker:latest
 ```
 
 ### Build devnet cluster docker image
@@ -65,7 +65,7 @@ docker push rsantev/hydragon-devnet:latest
 4. Build hydragon devnet cluster image
 
 ```
-cd h_devnet/devnet_cluster \
+cd docker/hydra_devnet_cluster \
 docker build --platform linux/amd64 -t rsantev/devnet-cluster:latest .
 ```
 

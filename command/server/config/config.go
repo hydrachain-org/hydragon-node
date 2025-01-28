@@ -14,7 +14,7 @@ import (
 
 // Config defines the server configuration params
 type Config struct {
-	GenesisPath              string     `json:"chain_config" yaml:"chain_config"`
+	GenesisFile              string     `json:"chain_config" yaml:"chain_config"`
 	SecretsConfigPath        string     `json:"secrets_config" yaml:"secrets_config"`
 	DataDir                  string     `json:"data_dir" yaml:"data_dir"`
 	BlockGasTarget           string     `json:"block_gas_target" yaml:"block_gas_target"`
@@ -104,7 +104,7 @@ func DefaultConfig() *Config {
 	defaultNetworkConfig := network.DefaultConfig()
 
 	return &Config{
-		GenesisPath:    "./genesis.json",
+		GenesisFile:    "mainnet", // will be resolved to the actual path
 		DataDir:        "",
 		BlockGasTarget: "0x5f5e100", // Special value signaling the parent gas limit should be applied
 		Network: &Network{

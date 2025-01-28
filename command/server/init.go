@@ -107,7 +107,7 @@ func (p *serverParams) initGenesisConfig() error {
 	var parseErr error
 
 	if p.genesisConfig, parseErr = chain.Import(
-		p.rawConfig.GenesisPath,
+		p.rawConfig.GenesisFile,
 	); parseErr != nil {
 		return parseErr
 	}

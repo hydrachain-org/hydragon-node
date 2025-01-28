@@ -10,6 +10,7 @@ import (
 	"github.com/hashicorp/go-multierror"
 	"github.com/umbracle/ethgo"
 
+	publicconfigs "github.com/0xPolygon/polygon-edge/chain/public-configs"
 	"github.com/0xPolygon/polygon-edge/helper/common"
 	"github.com/0xPolygon/polygon-edge/helper/hex"
 	"github.com/0xPolygon/polygon-edge/types"
@@ -377,7 +378,14 @@ func (g *GenesisAccount) UnmarshalJSON(data []byte) error {
 }
 
 func Import(chain string) (*Chain, error) {
-	return ImportFromFile(chain)
+	switch chain {
+	case "mainnet":
+		return importChain(publicconfigs.GetMainnetGenesis())
+	case "testnet":
+		return importChain(publicconfigs.GetTestnetGenesis())
+	default:
+		return ImportFromFile(chain)
+	}
 }
 
 // ImportFromFile imports a chain from a filepath

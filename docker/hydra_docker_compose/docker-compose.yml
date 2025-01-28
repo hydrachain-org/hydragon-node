@@ -2,15 +2,14 @@ version: "3.8"
 
 services:
   hydra-node:
-    image: rsantev/hydra-testnet:latest
+    image: rsantev/hydragon-docker:latest
     container_name: rpc-node-1
-    command:
-      [
+    command: [
         "server",
         "--data-dir",
         "./node",
         "--chain",
-        "genesis.json",
+        "testnet", # mainnet or testnet
         "--grpc-address",
         "127.0.0.1:9632",
         "--libp2p",
@@ -25,12 +24,12 @@ services:
         "--json-rpc-block-range-limit",
         "0",
       ]
+    platform: linux/amd64
     volumes:
       - ./node:/app/node
     environment:
       # CoinGecko API Key for generating secretsManagerConfig.json
       CG_KEY: ${COINGECKO_API_KEY}
-
     ports:
       - "10000:9632"
       - "10001:1478"

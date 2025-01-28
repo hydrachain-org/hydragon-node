@@ -7,11 +7,10 @@ USER root
 RUN apk add --no-cache bash curl
 
 COPY ./scripts/secrets.sh .
-COPY ./scripts/genesis.sh .
 COPY ./scripts/run.sh .
 
 # Make scripts executable
-RUN chmod +x genesis.sh run.sh secrets.sh
+RUN chmod +x secrets.sh run.sh
 
 EXPOSE 9632 1478 8545
 

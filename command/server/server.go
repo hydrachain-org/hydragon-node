@@ -47,10 +47,11 @@ func setFlags(cmd *cobra.Command) {
 	)
 
 	cmd.Flags().StringVar(
-		&params.rawConfig.GenesisPath,
-		genesisPathFlag,
-		defaultConfig.GenesisPath,
-		"the genesis file used for starting the chain",
+		&params.rawConfig.GenesisFile,
+		genesisFlag,
+		defaultConfig.GenesisFile,
+		"the genesis file used for starting the chain."+
+			`Can be "mainnet", "testnet" or "custom"<path_to_custom_genesis_file>"`,
 	)
 
 	cmd.Flags().StringVar(
@@ -299,6 +300,11 @@ func runPreRun(cmd *cobra.Command, _ []string) error {
 		if err := params.initConfigFromFile(); err != nil {
 			return err
 		}
+	}
+
+	// Before raw params are initialized, set the actual genesis path (if custom) based on --chain flag
+	if err := params.setGenesisFileFlag(params.rawConfig.GenesisFile); err != nil {
+		return err
 	}
 
 	if err := params.initRawParams(); err != nil {

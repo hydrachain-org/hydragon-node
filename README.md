@@ -148,8 +148,10 @@ hydra secrets generate --type encrypted-local --name node --extra "coingecko-api
 Run your node with the following command from its directory:
 
 ```
-hydra server --data-dir ./node-secrets --chain ./genesis.json --grpc-address :9632 --libp2p 0.0.0.0:1478 --jsonrpc 0.0.0.0:8545 --secrets-config ./secretsManagerConfig.json
+hydra server --data-dir ./node-secrets --chain mainnet --grpc-address :9632 --libp2p 0.0.0.0:1478 --jsonrpc 0.0.0.0:8545 --secrets-config ./secretsManagerConfig.json
 ```
+
+**Important!** Set the `--chain` flag to `testnet` for the Testnet network. For the Mainnet network, the `--chain` flag can be ommitted. You can also specify a custom genesis.json file path by setting `--chain` to "custom:<path_to_genesis_file>".
 
 This process may take some time, as the node needs to fully sync with the blockchain. Once the syncing process is complete, you can proceed with the next steps.
 
