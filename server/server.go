@@ -417,6 +417,7 @@ func NewServer(config *Config) (*Server, error) {
 		m.config.JSONRPC.JSONRPCAddr.String(),
 		m.secretsManager,
 		m.config.SecretsManager,
+		m.config.Chain.Params.Forks,
 	)
 	if err != nil {
 		return nil, err

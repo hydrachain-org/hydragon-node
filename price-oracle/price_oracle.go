@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/0xPolygon/polygon-edge/blockchain"
+	"github.com/0xPolygon/polygon-edge/chain"
 	"github.com/0xPolygon/polygon-edge/consensus"
 	"github.com/0xPolygon/polygon-edge/consensus/polybft"
 	"github.com/0xPolygon/polygon-edge/consensus/polybft/contractsapi"
@@ -78,8 +79,9 @@ func NewPriceOracle(
 	jsonRPC string,
 	secretsManager secrets.SecretsManager,
 	secretsManagerConfig *secrets.SecretsManagerConfig,
+	forks *chain.Forks,
 ) (*PriceOracle, error) {
-	priceFeed, err := NewPriceFeed(secretsManagerConfig)
+	priceFeed, err := NewPriceFeed(secretsManagerConfig, forks)
 	if err != nil {
 		return nil, err
 	}

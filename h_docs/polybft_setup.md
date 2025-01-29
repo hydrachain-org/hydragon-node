@@ -41,15 +41,15 @@ We need to set native token to be mintable, so we can premine balances to differ
 4. Run the chain
 
 ```
-./hydra server --data-dir ./test-chain-1 --chain genesis.json --grpc-address :5001 --libp2p :30301 --jsonrpc :10001 --log-level DEBUG --log-to ./log
+./hydra server --data-dir ./test-chain-1 --chain "custom:./genesis.json" --grpc-address :5001 --libp2p :30301 --jsonrpc :10001 --log-level DEBUG --log-to ./log
 
-./hydra server --data-dir ./test-chain-2 --chain genesis.json --grpc-address :5002 --libp2p :30302 --jsonrpc :10002 --log-level DEBUG --log-to ./log-2
+./hydra server --data-dir ./test-chain-2 --chain "custom:./genesis.json" --grpc-address :5002 --libp2p :30302 --jsonrpc :10002 --log-level DEBUG --log-to ./log-2
 
-./hydra server --data-dir ./test-chain-3 --chain genesis.json --grpc-address :5003 --libp2p :30303 --jsonrpc :10003 --log-level DEBUG --log-to ./log-3
+./hydra server --data-dir ./test-chain-3 --chain "custom:./genesis.json" --grpc-address :5003 --libp2p :30303 --jsonrpc :10003 --log-level DEBUG --log-to ./log-3
 
-./hydra server --data-dir ./test-chain-4 --chain genesis.json --grpc-address :5004 --libp2p :30304 --jsonrpc :10004 --log-level DEBUG --log-to ./log-4
+./hydra server --data-dir ./test-chain-4 --chain "custom:./genesis.json" --grpc-address :5004 --libp2p :30304 --jsonrpc :10004 --log-level DEBUG --log-to ./log-4
 
-./hydra server --data-dir ./test-chain-5 --chain genesis.json --grpc-address :5005 --libp2p :30305 --jsonrpc :10005 --log-level DEBUG --log-to ./log-5
+./hydra server --data-dir ./test-chain-5 --chain "custom:./genesis.json" --grpc-address :5005 --libp2p :30305 --jsonrpc :10005 --log-level DEBUG --log-to ./log-5
 ```
 
 #### Add more validators
@@ -61,11 +61,13 @@ We need to set native token to be mintable, so we can premine balances to differ
 ```
 
 In order to output private and public keys, use the following commands:
+
 ```
 ./hydra secrets output-private --data-dir ./test-add-chain-1 --insecure
 ```
 
 for the secret keys, and the following for the public keys, including the Node ID:
+
 ```
 ./hydra secrets output-public --data-dir ./test-add-chain-1 --insecure
 ```
@@ -164,7 +166,8 @@ After the withdrawal period has ended, you can claim the remaining funds using t
 ```
 
 2. Create manifest file
-  This is the first version of edge that needs a manifest file. It contains information about the initial validators.
+
+This is the first version of edge that needs a manifest file. It contains information about the initial validators.
 
 ```
 ./hydra manifest --validators-prefix test-chain-
@@ -218,6 +221,7 @@ We do the following configuration:
 - Map port 1478 of the container to port 1478 of the host machine
 - Mounts the directory /path/on/host from the host machine to /app/node inside the container.
 - Add the following command:
+
   ```
   server --data-dir ./node --chain genesis.json --grpc-address 127.0.0.1:9632 --libp2p 0.0.0.0:1478 --jsonrpc 0.0.0.0:8545 --prometheus 0.0.0.0:5001 --log-level DEBUG json-rpc-block-range-limit 0
   ```
@@ -273,6 +277,7 @@ Use the following command in case you want to execute the stake operation only:
 Congratulations! You are now a Hydra Chain validator!
 
 6. After becoming a validator, you can set the desired commission that will be deducted from the delegators' rewards.
+
 Additionally, you can update the commission if you need to.
 
 ```
