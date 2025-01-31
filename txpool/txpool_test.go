@@ -29,8 +29,8 @@ import (
 const (
 	defaultPriceLimit         uint64 = 1
 	defaultBaseFee            uint64 = 1
-	defaultMaxSlots           uint64 = 32768
-	defaultMaxAccountEnqueued uint64 = 2048
+	defaultMaxSlots           uint64 = 262144
+	defaultMaxAccountEnqueued uint64 = 16384
 	validGasLimit             uint64 = 4712350
 )
 
