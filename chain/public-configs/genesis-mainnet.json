@@ -151,6 +151,9 @@
       "petersburg": {
         "block": 0
       },
+      "priceOracleFix": {
+        "block": 12419989
+      },
       "quorumcalcalignment": {
         "block": 0
       },

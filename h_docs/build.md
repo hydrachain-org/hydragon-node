@@ -7,13 +7,13 @@ Information about building and using the application
 1. MacOS ARM64
 
 ```
-CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o hydra -a -installsuffix cgo main.go
+GOOS=darwin GOARCH=arm64 make build
 ```
 
 2. Linux
 
 ```
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o hydra -a -installsuffix cgo main.go
+GOOS=linux GOARCH=amd64 make build
 ```
 
 ## Move to path
@@ -29,7 +29,7 @@ sudo mv hydra /usr/local/bin
 1. Build node source code
 
 ```
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o hydra -a -installsuffix cgo main.go
+GOOS=linux GOARCH=amd64 make build
 ```
 
 2. Build node image with the commit tag
