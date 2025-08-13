@@ -60,22 +60,14 @@ func NewValidatorSet(valz AccountSet, logger hclog.Logger) *validatorSet {
 // based on its voting power and quorum size
 func (vs validatorSet) HasQuorum(blockNumber uint64, signers map[types.Address]struct{}) bool {
 	aggregateVotingPower := big.NewInt(0)
-	valsCount := 0
 
 	for address := range signers {
 		if votingPower := vs.votingPowerMap[address]; votingPower != nil {
 			_ = aggregateVotingPower.Add(aggregateVotingPower, votingPower)
-
-			valsCount++
 		}
 	}
 
-	var quorumSize *big.Int
-	if valsCount < 4 {
-		quorumSize = vs.totalVotingPower
-	} else {
-		quorumSize = getQuorumSize(blockNumber, vs.totalVotingPower)
-	}
+	quorumSize := getQuorumSize(blockNumber, vs.totalVotingPower)
 
 	hasQuorum := aggregateVotingPower.Cmp(quorumSize) >= 0
 
