@@ -10,18 +10,36 @@ import (
 
 // Config details the params for the base networking server
 type Config struct {
-	NoDiscover       bool                   // flag indicating if the discovery mechanism should be turned on
-	Addr             *net.TCPAddr           // the base address
-	NatAddr          net.IP                 // the NAT address
-	DNS              multiaddr.Multiaddr    // the DNS address
-	DataDir          string                 // the base data directory for the client
-	MaxPeers         int64                  // the maximum number of peer connections
-	MaxInboundPeers  int64                  // the maximum number of inbound peer connections
-	MaxOutboundPeers int64                  // the maximum number of outbound peer connections
-	Chain            *chain.Chain           // the reference to the chain configuration
-	SecretsManager   secrets.SecretsManager // the secrets manager used for key storage
+	// The base directory for the network
+	DataDir string
+	// The address of the libp2p server
+	Addr *net.TCPAddr
+	// The NAT address
+	NatAddr net.IP
+	// The DNS address
+	DNS multiaddr.Multiaddr
+	// The maximum number of peers
+	MaxPeers int64
+	// The maximum number of inbound peers
+	MaxInboundPeers int64
+	// The maximum number of outbound peers
+	MaxOutboundPeers int64
+	// The chain configuration
+	Chain *chain.Chain
+	// The bootnodes to connect to
+	Bootnodes []string
+	// The secrets manager
+	SecretsManager secrets.SecretsManager
+	// Whether to disable peer discovery
+	NoDiscover bool
 }
 
+// GetBootnodes returns the list of bootnodes
+func (c *Config) GetBootnodes() []string {
+	return c.Bootnodes
+}
+
+// DefaultConfig returns the default network configuration
 func DefaultConfig() *Config {
 	return &Config{
 		// The discovery service is turned on by default

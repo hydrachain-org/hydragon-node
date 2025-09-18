@@ -19,6 +19,7 @@ type Params struct {
 	ChainID        int64                  `json:"chainID"`
 	Engine         map[string]interface{} `json:"engine"`
 	BlockGasTarget uint64                 `json:"blockGasTarget"`
+	Bootnodes      []string               `json:"bootnodes"`
 
 	// Access control configuration
 	ContractDeployerAllowList *AddressListConfig `json:"contractDeployerAllowList,omitempty"`

@@ -1,10 +1,13 @@
 package server
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"net"
+	"os"
+	"path/filepath"
 
 	"github.com/0xPolygon/polygon-edge/command/server/config"
 
@@ -42,6 +45,10 @@ func (p *serverParams) initRawParams() error {
 	}
 
 	if err := p.initGenesisConfig(); err != nil {
+		return err
+	}
+
+	if err := p.initBootnodeConfig(); err != nil {
 		return err
 	}
 
@@ -307,4 +314,114 @@ func (p *serverParams) initGRPCAddress() error {
 	}
 
 	return nil
+}
+
+// initBootnodeConfig initializes the bootnode configuration from various sources
+func (p *serverParams) initBootnodeConfig() error {
+	var err error
+	p.bootnodeConfig, err = p.getBootnodeConfig()
+
+	return err
+}
+
+// getBootnodeConfig retrieves bootnode configuration from various sources
+func (p *serverParams) getBootnodeConfig() (*chain.Bootnode, error) {
+	var defaultBootnodes []string
+
+	var userBootnodes []string
+
+	// 1. Load default bootnodes (mainnet/testnet or bootnode.json)
+	if p.rawConfig.GenesisFile == "mainnet" || p.rawConfig.GenesisFile == "testnet" {
+		// The bootnodes will be loaded from the chain config for mainnet/testnet
+		p.logger.Info("Using default bootnodes for", "network", p.rawConfig.GenesisFile)
+
+		if p.genesisConfig != nil && p.genesisConfig.Params != nil {
+			defaultBootnodes = p.genesisConfig.Params.Bootnodes
+		}
+	} else {
+		// For custom networks, try to load from bootnode.json
+		configPath := filepath.Join(filepath.Dir(p.rawConfig.GenesisFile), "bootnode.json")
+		if _, err := os.Stat(configPath); err == nil {
+			if data, err := os.ReadFile(configPath); err == nil {
+				var nodeConfig struct {
+					Node struct {
+						P2P struct {
+							StaticNodes []string `json:"staticNodes"`
+						} `json:"p2p"`
+					} `json:"node"`
+				}
+
+				if err := json.Unmarshal(data, &nodeConfig); err == nil {
+					defaultBootnodes = nodeConfig.Node.P2P.StaticNodes
+				}
+			}
+		}
+	}
+
+	// 2. Load user-specified bootnodes from bootnodePath, if set
+	if p.rawConfig.BootnodePath != "" {
+		data, err := os.ReadFile(p.rawConfig.BootnodePath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read bootnode config file %s: %w", p.rawConfig.BootnodePath, err)
+		}
+
+		var bootnodeConfig struct {
+			Bootnodes []string `json:"bootnodes"`
+		}
+
+		if err := json.Unmarshal(data, &bootnodeConfig); err != nil {
+			return nil, fmt.Errorf("failed to parse bootnode config file %s: %w", p.rawConfig.BootnodePath, err)
+		}
+
+		userBootnodes = bootnodeConfig.Bootnodes
+	}
+
+	// 3. Merge default and user bootnodes, removing duplicates
+	bootnodeSet := make(map[string]struct{})
+	allBootnodes := make([]string, 0)
+
+	for _, b := range defaultBootnodes {
+		if _, exists := bootnodeSet[b]; !exists {
+			bootnodeSet[b] = struct{}{}
+
+			allBootnodes = append(allBootnodes, b)
+		}
+	}
+
+	for _, b := range userBootnodes {
+		if _, exists := bootnodeSet[b]; !exists {
+			bootnodeSet[b] = struct{}{}
+
+			allBootnodes = append(allBootnodes, b)
+		}
+	}
+
+	// 4. Fallback: If still empty, try to load last_peers.json
+	if len(allBootnodes) == 0 {
+		lastPeersPath := filepath.Join(p.rawConfig.DataDir, "libp2p", "last_peers.json")
+		if data, err := os.ReadFile(lastPeersPath); err == nil {
+			var lastPeers []string
+			if err := json.Unmarshal(data, &lastPeers); err == nil {
+				for _, b := range lastPeers {
+					bootnodeSet[b] = struct{}{}
+				}
+
+				p.logger.Info(fmt.Sprintf("Loaded bootnodes from last_peers.json: %v", lastPeers))
+			}
+		}
+		// Rebuild bootnodes slice
+		allBootnodes = make([]string, 0, len(bootnodeSet))
+		for b := range bootnodeSet {
+			allBootnodes = append(allBootnodes, b)
+		}
+	}
+
+	if len(allBootnodes) == 0 {
+		return nil, fmt.Errorf("no bootnodes found from any source. Please specify bootnodes via " +
+			"--bootnode-path, use mainnet/testnet, or ensure bootnode.json exists for custom networks")
+	}
+
+	return &chain.Bootnode{
+		Bootnodes: allBootnodes,
+	}, nil
 }

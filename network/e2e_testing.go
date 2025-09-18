@@ -257,7 +257,8 @@ func initBootnodes(server *Server, bootnodes ...string) {
 		}
 	}
 
-	server.config.Chain.Bootnodes = savedBootnodes
+	// Set bootnodes in the network configuration
+	server.config.Bootnodes = savedBootnodes
 }
 
 func CreateServer(params *CreateServerParams) (*Server, error) {
@@ -274,6 +275,7 @@ func CreateServer(params *CreateServerParams) (*Server, error) {
 			ChainID: 1,
 		},
 	}
+	// Chain configuration is handled at the server level, not in network config
 
 	if params == nil {
 		params = emptyParams
@@ -306,8 +308,6 @@ func CreateServer(params *CreateServerParams) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	initBootnodes(server)
 
 	if params.ServerCallback != nil {
 		params.ServerCallback(server)

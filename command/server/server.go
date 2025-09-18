@@ -55,6 +55,12 @@ func setFlags(cmd *cobra.Command) {
 	)
 
 	cmd.Flags().StringVar(
+		&params.rawConfig.BootnodePath,
+		bootnodePathFlag,
+		defaultConfig.BootnodePath,
+		"the bootnode file used for connecting to chain",
+	)
+	cmd.Flags().StringVar(
 		&params.configPath,
 		configFlag,
 		"",
@@ -321,7 +327,15 @@ func isConfigFileSpecified(cmd *cobra.Command) bool {
 func runCommand(cmd *cobra.Command, _ []string) {
 	outputter := command.InitializeOutputter(cmd)
 
-	if err := runServerLoop(params.generateConfig(), outputter); err != nil {
+	config, err := params.generateConfig()
+	if err != nil {
+		outputter.SetError(err)
+		outputter.WriteOutput()
+
+		return
+	}
+
+	if err := runServerLoop(config, outputter); err != nil {
 		outputter.SetError(err)
 		outputter.WriteOutput()
 

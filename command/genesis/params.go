@@ -100,6 +100,7 @@ type genesisParams struct {
 	consensusEngineConfig map[string]interface{}
 
 	genesisConfig *chain.Chain
+	bootnode      *chain.Bootnode
 
 	// PolyBFT
 	sprintSize     uint64
@@ -424,7 +425,6 @@ func (p *genesisParams) initGenesisConfig() error {
 			Engine:         p.consensusEngineConfig,
 			BlockGasTarget: 100000000,
 		},
-		Bootnodes: p.bootnodes,
 	}
 
 	// burn contract can be set only for non mintable native token

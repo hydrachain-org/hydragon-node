@@ -37,10 +37,14 @@ var (
 
 // Chain is the blockchain chain configuration
 type Chain struct {
-	Name      string   `json:"name"`
-	Genesis   *Genesis `json:"genesis"`
-	Params    *Params  `json:"params"`
-	Bootnodes []string `json:"bootnodes,omitempty"`
+	Name    string   `json:"name" yaml:"name"`
+	Genesis *Genesis `json:"genesis" yaml:"genesis"`
+	Params  *Params  `json:"params" yaml:"params"`
+}
+
+// Bootnode represents the bootnode configuration
+type Bootnode struct {
+	Bootnodes []string `json:"bootnodes" yaml:"bootnodes"`
 }
 
 // Genesis specifies the header fields, state of a genesis block

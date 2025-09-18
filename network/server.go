@@ -2,8 +2,11 @@ package network
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -88,6 +91,14 @@ type Server struct {
 	temporaryDials sync.Map // map of temporary connections; peerID -> bool
 
 	bootnodes *bootnodesWrapper // reference of all bootnodes for the node
+
+	lastKnownPeers []string // list of peer addresses (as strings) that were last known to be connected.
+
+	lastKnownPeersLock sync.Mutex // a mutex to protect concurrent access to lastKnownPeers.
+
+	failedBootnodeIDs    map[peer.ID]struct{} // track failed bootnode connection attempts
+	bootnodeFallbackUsed bool                 // ensure fallback only happens once per startup
+	bootnodeFallbackLock sync.Mutex           // lock for fallback logic
 }
 
 // NewServer returns a new instance of the networking server
@@ -154,6 +165,7 @@ func NewServer(logger hclog.Logger, config *Config) (*Server, error) {
 			config.MaxInboundPeers,
 			config.MaxOutboundPeers,
 		),
+		failedBootnodeIDs: make(map[peer.ID]struct{}),
 	}
 
 	// start gossip protocol
@@ -266,8 +278,13 @@ func (s *Server) Start() error {
 		}
 	}
 
+	// Initialize failed bootnode tracking and fallback state
+	s.failedBootnodeIDs = make(map[peer.ID]struct{})
+	s.bootnodeFallbackUsed = false
+
 	go s.runDial()
 	go s.keepAliveMinimumPeerConnections()
+	go s.monitorBootnodeFailures()
 
 	// watch for disconnected peers
 	s.host.Network().Notify(&network.NotifyBundle{
@@ -280,47 +297,107 @@ func (s *Server) Start() error {
 	return nil
 }
 
+// Helper to load last known peers from file
+func (s *Server) loadLastKnownPeersFromFile() ([]string, error) {
+	filePath := filepath.Join(s.config.DataDir, "last_peers.json")
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, err
+	}
+
+	var peers []string
+
+	if err := json.Unmarshal(data, &peers); err != nil {
+		return nil, err
+	}
+
+	return peers, nil
+}
+
 // setupBootnodes sets up the node's bootnode connections
 func (s *Server) setupBootnodes() error {
-	// Check the bootnode config is present
-	if s.config.Chain.Bootnodes == nil {
-		return ErrNoBootnodes
-	}
+	bootnodes := s.config.GetBootnodes()
+	if len(bootnodes) == 0 {
+		if s.config.NoDiscover {
+			s.logger.Info("starting without bootnodes in no-discover mode")
 
-	// Check if at least one bootnode is specified
-	if len(s.config.Chain.Bootnodes) < MinimumBootNodes {
-		return ErrMinBootnodes
-	}
-
-	bootnodesArr := make([]*peer.AddrInfo, 0)
-	bootnodesMap := make(map[peer.ID]*peer.AddrInfo)
-
-	for _, rawAddr := range s.config.Chain.Bootnodes {
-		bootnode, err := common.StringToAddrInfo(rawAddr)
-		if err != nil {
-			return fmt.Errorf("failed to parse bootnode %s: %w", rawAddr, err)
+			return nil
 		}
+		// Don't return error, just warn
+		s.logger.Warn("no bootnodes specified, network may be isolated")
 
-		if bootnode.ID == s.host.ID() {
-			s.logger.Info("Omitting bootnode with same ID as host", "id", bootnode.ID)
+		return nil
+	}
+
+	var validBootnodes []*peer.AddrInfo //nolint:prealloc
+
+	for _, rawAddr := range bootnodes {
+		addr, err := common.StringToAddrInfo(rawAddr)
+		if err != nil {
+			s.logger.Error("failed to parse bootnode", "addr", rawAddr, "err", err)
+
+			continue
+		}
+		// Skip self-connection
+		if addr.ID == s.host.ID() {
+			s.logger.Info("Omitting bootnode with same ID as host", "id", addr.ID)
 
 			continue
 		}
 
-		bootnodesArr = append(bootnodesArr, bootnode)
-		bootnodesMap[bootnode.ID] = bootnode
+		validBootnodes = append(validBootnodes, addr)
 	}
 
-	// It's fine for the bootnodes field to be unprotected
-	// at this point because it is initialized once (doesn't change),
-	// and used only after this point
-	s.bootnodes = &bootnodesWrapper{
-		bootnodeArr:       bootnodesArr,
-		bootnodesMap:      bootnodesMap,
-		bootnodeConnCount: 0,
+	if len(validBootnodes) == 0 {
+		// All bootnodes were invalid or self, try last_peers.json as fallback
+		lastPeers, err := s.loadLastKnownPeersFromFile()
+		if err == nil && len(lastPeers) > 0 {
+			s.logger.Warn("All configured bootnodes invalid/unreachable, falling back to last_peers.json", "peers", lastPeers)
+
+			for _, rawAddr := range lastPeers {
+				addr, err := common.StringToAddrInfo(rawAddr)
+				if err != nil {
+					s.logger.Error("failed to parse last known peer", "addr", rawAddr, "err", err)
+
+					continue
+				}
+
+				validBootnodes = append(validBootnodes, addr)
+			}
+		} else {
+			s.logger.Warn("No valid bootnodes or last known peers found; network may be isolated")
+
+			return nil
+		}
+	}
+
+	for _, addr := range validBootnodes {
+		// Add to bootnodesWrapper
+		s.bootnodes.bootnodeArr = append(s.bootnodes.bootnodeArr, addr)
+		s.bootnodes.bootnodesMap[addr.ID] = addr
+		// Add to dial queue with high priority
+		s.addToDialQueue(addr, common.PriorityRequestedDial)
+		// Mark as persistent connection
+		s.addToPersistentPeers(addr.ID)
+		s.logger.Debug("Added bootnode to dial queue", "addr", addr)
 	}
 
 	return nil
+}
+
+// addToPersistentPeers adds a peer to the persistent peers map
+func (s *Server) addToPersistentPeers(peerID peer.ID) {
+	s.peersLock.Lock()
+	defer s.peersLock.Unlock()
+
+	if _, ok := s.peers[peerID]; !ok {
+		s.peers[peerID] = &PeerConnInfo{
+			Info:            peer.AddrInfo{ID: peerID},
+			connDirections:  make(map[network.Direction]bool),
+			protocolStreams: make(map[string]*rawGrpc.ClientConn),
+		}
+	}
 }
 
 // keepAliveMinimumPeerConnections will attempt to make new connections
@@ -434,9 +511,13 @@ func (s *Server) Peers() []*PeerConnInfo {
 	defer s.peersLock.Unlock()
 
 	peers := make([]*PeerConnInfo, 0)
-	for _, connectionInfo := range s.peers {
+	for id, connectionInfo := range s.peers {
+		s.logger.Info("Peers() entry", "peerID", id)
+
 		peers = append(peers, connectionInfo)
 	}
+
+	s.logger.Info("Peers to persist", "addrs", peers)
 
 	return peers
 }
@@ -482,6 +563,12 @@ func (s *Server) removePeer(peerID peer.ID) {
 
 	// Emit the event alerting listeners
 	s.emitEvent(peerID, peerEvent.PeerDisconnected)
+
+	// Remove from lastKnownPeers
+	addrStr, err := common.AddrInfoToString(&connectionInfo.Info)
+	if err == nil {
+		s.removePeerFromLastKnown(addrStr)
+	}
 }
 
 // removePeerInfo removes (pops) peer connection info from the networking
@@ -580,6 +667,34 @@ func (s *Server) joinPeer(peerInfo *peer.AddrInfo) {
 }
 
 func (s *Server) Close() error {
+	s.logger.Info("Persisting peers to last_peers.json on shutdown")
+
+	peers := s.Peers()
+	addrs := []string{}
+
+	for _, p := range peers {
+		addrStr, err := common.AddrInfoToString(&p.Info)
+		if err == nil {
+			addrs = append(addrs, addrStr)
+		}
+	}
+
+	if len(addrs) > 0 {
+		data, err := json.MarshalIndent(addrs, "", "  ")
+
+		if err != nil {
+			s.logger.Warn("Failed to marshal peers for persistence", "err", err)
+		} else {
+			filePath := filepath.Join(s.config.DataDir, "last_peers.json")
+			s.logger.Info("Writing last_peers.json", "file", filePath, "peers", addrs)
+			err = os.WriteFile(filePath, data, 0600)
+
+			if err != nil {
+				s.logger.Warn("Failed to persist peers to last_peers.json", "err", err)
+			}
+		}
+	}
+
 	err := s.host.Close()
 	s.dialQueue.Close()
 
@@ -744,5 +859,110 @@ func (s *Server) updatePendingConnCountMetrics(direction network.Direction) {
 	case network.DirOutbound:
 		metrics.SetGauge([]string{networkMetrics, "pending_outbound_connections_count"},
 			float32(s.connectionCounts.GetPendingOutboundConnCount()))
+	}
+}
+
+func (s *Server) addPeerToLastKnown(addr string) {
+	s.lastKnownPeersLock.Lock()
+	defer s.lastKnownPeersLock.Unlock()
+
+	for _, a := range s.lastKnownPeers {
+		if a == addr {
+			return // already present
+		}
+	}
+
+	s.lastKnownPeers = append(s.lastKnownPeers, addr)
+
+	s.persistLastKnownPeers()
+}
+
+func (s *Server) removePeerFromLastKnown(addr string) {
+	s.lastKnownPeersLock.Lock()
+	defer s.lastKnownPeersLock.Unlock()
+	newPeers := make([]string, 0, len(s.lastKnownPeers))
+
+	for _, a := range s.lastKnownPeers {
+		if a != addr {
+			newPeers = append(newPeers, a)
+		}
+	}
+
+	s.lastKnownPeers = newPeers
+	s.persistLastKnownPeers()
+}
+
+func (s *Server) persistLastKnownPeers() {
+	if len(s.lastKnownPeers) == 0 {
+		return
+	}
+
+	data, err := json.MarshalIndent(s.lastKnownPeers, "", "  ")
+
+	if err != nil {
+		s.logger.Warn("Failed to marshal lastKnownPeers", "err", err)
+
+		return
+	}
+
+	filePath := filepath.Join(s.config.DataDir, "last_peers.json")
+	s.logger.Info("Persisting lastKnownPeers to file", "file", filePath, "peers", s.lastKnownPeers)
+
+	err = os.WriteFile(filePath, data, 0600)
+
+	if err != nil {
+		s.logger.Warn("Failed to persist lastKnownPeers to file", "err", err)
+	}
+}
+
+func (s *Server) monitorBootnodeFailures() {
+	ctx := context.Background()
+	eventCh, err := s.SubscribeCh(ctx)
+
+	if err != nil {
+		s.logger.Error("Failed to subscribe to peer events for bootnode fallback", "err", err)
+
+		return
+	}
+
+	for ev := range eventCh {
+		if ev.Type == peerEvent.PeerFailedToConnect {
+			s.bootnodeFallbackLock.Lock()
+			_, isBootnode := s.bootnodes.bootnodesMap[ev.PeerID]
+
+			if isBootnode {
+				s.failedBootnodeIDs[ev.PeerID] = struct{}{}
+
+				if len(s.failedBootnodeIDs) == len(s.bootnodes.bootnodeArr) &&
+					!s.bootnodeFallbackUsed && len(s.bootnodes.bootnodeArr) > 0 {
+					s.logger.Warn("All bootnode connection attempts failed, falling back to last_peers.json")
+					s.bootnodeFallbackUsed = true
+					// Clear current bootnodes
+					s.bootnodes.bootnodeArr = nil
+					s.bootnodes.bootnodesMap = make(map[peer.ID]*peer.AddrInfo)
+					// Load last known peers
+					lastPeers, err := s.loadLastKnownPeersFromFile()
+					if err == nil && len(lastPeers) > 0 {
+						for _, rawAddr := range lastPeers {
+							addr, err := common.StringToAddrInfo(rawAddr)
+							if err != nil {
+								s.logger.Error("failed to parse last known peer", "addr", rawAddr, "err", err)
+
+								continue
+							}
+
+							s.bootnodes.bootnodeArr = append(s.bootnodes.bootnodeArr, addr)
+							s.bootnodes.bootnodesMap[addr.ID] = addr
+							s.addToDialQueue(addr, common.PriorityRequestedDial)
+							s.addToPersistentPeers(addr.ID)
+							s.logger.Debug("Added fallback bootnode to dial queue", "addr", addr)
+						}
+					} else {
+						s.logger.Warn("No last known peers found for fallback; network may be isolated")
+					}
+				}
+			}
+			s.bootnodeFallbackLock.Unlock()
+		}
 	}
 }

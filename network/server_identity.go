@@ -43,6 +43,14 @@ func (s *Server) AddPeer(id peer.ID, direction network.Direction) {
 	// Emit the event alerting listeners
 	// WARNING: THIS CALL IS POTENTIALLY BLOCKING
 	s.emitEvent(id, peerEvent.PeerConnected)
+
+	// Add to lastKnownPeers
+	peerInfo := s.host.Peerstore().PeerInfo(id)
+	addrStr, err := common.AddrInfoToString(&peerInfo)
+
+	if err == nil {
+		s.addPeerToLastKnown(addrStr)
+	}
 }
 
 // addPeerInfo updates the networking server's internal peer info table

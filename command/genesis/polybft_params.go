@@ -1,10 +1,13 @@
 package genesis
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -74,6 +77,17 @@ type PricesDataCoinGecko struct {
 	Prices [][]float64 `json:"prices"`
 }
 
+type NodeConfig struct {
+	Node struct {
+		P2P struct {
+			StaticNodes []string `json:"staticNodes"`
+		} `json:"p2p"`
+	} `json:"node"`
+	JSON struct {
+		Enabled bool `json:"enabled"`
+	} `json:"json"`
+}
+
 // generatePolyBftChainConfig creates and persists polybft chain configuration to the provided file path
 func (p *genesisParams) generatePolyBftChainConfig(o command.OutputFormatter) error {
 	// populate premine balance map
@@ -117,6 +131,11 @@ func (p *genesisParams) generatePolyBftChainConfig(o command.OutputFormatter) er
 		return err
 	}
 
+	// Generate bootnode.json with bootnodes
+	if err := p.generateNodeConfig(initialValidators); err != nil {
+		return fmt.Errorf("failed to generate node config: %w", err)
+	}
+
 	polyBftConfig := &polybft.PolyBFTConfig{
 		InitialValidatorSet:      initialValidators,
 		BlockTime:                common.Duration{Duration: p.blockTime},
@@ -155,7 +174,6 @@ func (p *genesisParams) generatePolyBftChainConfig(o command.OutputFormatter) er
 			},
 			BlockGasTarget: 100000000,
 		},
-		Bootnodes: p.bootnodes,
 	}
 
 	// Hydra modification: we use the 0x0 address for burning, thus, we don't need this
@@ -220,11 +238,6 @@ func (p *genesisParams) generatePolyBftChainConfig(o command.OutputFormatter) er
 		}
 
 		validatorMetadata[i] = metadata
-
-		// set genesis validators as boot nodes if boot nodes not provided via CLI
-		if len(p.bootnodes) == 0 {
-			chainConfig.Bootnodes = append(chainConfig.Bootnodes, validator.MultiAddr)
-		}
 	}
 
 	genesisExtraData, err := GenerateExtraDataPolyBft(validatorMetadata)
@@ -527,6 +540,41 @@ func (p *genesisParams) initSecretsConfig() error {
 
 	if p.secretsConfig, parseErr = secrets.ReadConfig(p.secretsConfigPath); parseErr != nil {
 		return fmt.Errorf("unable to read secrets config file, %w", parseErr)
+	}
+
+	return nil
+}
+
+// generateNodeConfig creates and persists node configuration to bootnode.json
+func (p *genesisParams) generateNodeConfig(validators []*validator.GenesisValidator) error {
+	config := &NodeConfig{}
+	config.Node.P2P.StaticNodes = make([]string, len(validators))
+	config.JSON.Enabled = false
+
+	// Generate static nodes from validators
+	for i, validator := range validators {
+		nodeID := strings.Split(validator.MultiAddr, "/p2p/")[1]
+		multiAddr := fmt.Sprintf("/ip4/127.0.0.1/tcp/%d/p2p/%s",
+			bootnodePortStart+i,
+			nodeID)
+		config.Node.P2P.StaticNodes[i] = multiAddr
+	}
+
+	// Create config directory if it doesn't exist
+	configDir := filepath.Dir(p.genesisPath)
+	configPath := filepath.Join(configDir, "bootnode.json")
+
+	file, err := os.OpenFile(configPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to create bootnode file: %w", err)
+	}
+	defer file.Close()
+
+	encoder := json.NewEncoder(file)
+	encoder.SetIndent("", "  ")
+
+	if err := encoder.Encode(config); err != nil {
+		return fmt.Errorf("failed to encode bootnode config: %w", err)
 	}
 
 	return nil

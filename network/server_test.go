@@ -408,7 +408,7 @@ func TestPeerReconnection(t *testing.T) {
 			addr2, err := common.AddrInfoToString(bootnodes[1].AddrInfo())
 			assert.NoError(t, err)
 
-			server.config.Chain.Bootnodes = []string{addr1, addr2}
+			server.config.Bootnodes = []string{addr1, addr2}
 		},
 	}
 
@@ -572,23 +572,26 @@ func TestReconnectionWithNewIP(t *testing.T) {
 
 func TestSelfConnection_WithBootNodes(t *testing.T) {
 	// Create a temporary directory for storing the key file
-	key, directoryName := GenerateTestLibp2pKey(t)
-	peerID, err := peer.IDFromPrivateKey(key)
-	assert.NoError(t, err)
+	_, directoryName := GenerateTestLibp2pKey(t)
 	testMultiAddr := tests.GenerateTestMultiAddr(t).String()
 	peerAddressInfo, err := common.StringToAddrInfo(testMultiAddr)
 	assert.NoError(t, err)
 
 	testTable := []struct {
-		name         string
-		bootNodes    []string
-		expectedList []*peer.AddrInfo
+		name           string
+		setupBootNodes func(server *Server) []string
+		expectedList   []*peer.AddrInfo
 	}{
 
 		{
-			name:         "Should return an non empty bootnodes list",
-			bootNodes:    []string{"/ip4/127.0.0.1/tcp/10001/p2p/" + peerID.String(), testMultiAddr},
-			expectedList: []*peer.AddrInfo{peerAddressInfo},
+			name: "Should return an non empty bootnodes list",
+			setupBootNodes: func(server *Server) []string {
+				// Create self-bootnode using server's actual peer ID
+				selfBootnode := fmt.Sprintf("/ip4/127.0.0.1/tcp/10001/p2p/%s", server.host.ID().String())
+
+				return []string{selfBootnode, testMultiAddr}
+			},
+			expectedList: []*peer.AddrInfo{peerAddressInfo}, // Only external bootnode should remain
 		},
 	}
 
@@ -599,13 +602,21 @@ func TestSelfConnection_WithBootNodes(t *testing.T) {
 					c.NoDiscover = false
 					c.DataDir = directoryName
 				},
-				ServerCallback: func(server *Server) {
-					server.config.Chain.Bootnodes = tt.bootNodes
-				},
 			})
 			if createErr != nil {
 				t.Fatalf("Unable to create server, %v", createErr)
 			}
+
+			// Set up bootnodes using server's actual peer ID
+			server.config.Bootnodes = tt.setupBootNodes(server)
+
+			// Start the server to trigger bootnode setup
+			if startErr := server.Start(); startErr != nil {
+				t.Fatalf("Unable to start server, %v", startErr)
+			}
+			defer func() {
+				assert.NoError(t, server.Close())
+			}()
 
 			assert.Equal(t, tt.expectedList, server.bootnodes.getBootnodes())
 		})
@@ -853,7 +864,7 @@ func TestMinimumBootNodeCount(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			_, createErr := CreateServer(&CreateServerParams{
 				ServerCallback: func(server *Server) {
-					server.config.Chain.Bootnodes = tt.bootNodes
+					server.config.Chain.Params.Bootnodes = tt.bootNodes
 				},
 			})
 

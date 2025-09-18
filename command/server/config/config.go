@@ -15,6 +15,7 @@ import (
 // Config defines the server configuration params
 type Config struct {
 	GenesisFile              string     `json:"chain_config" yaml:"chain_config"`
+	BootnodePath             string     `json:"bootnode_config" yaml:"bootnode_config"`
 	SecretsConfigPath        string     `json:"secrets_config" yaml:"secrets_config"`
 	DataDir                  string     `json:"data_dir" yaml:"data_dir"`
 	BlockGasTarget           string     `json:"block_gas_target" yaml:"block_gas_target"`

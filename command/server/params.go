@@ -2,7 +2,9 @@ package server
 
 import (
 	"errors"
+	"fmt"
 	"net"
+	"path/filepath"
 	"strings"
 
 	"github.com/0xPolygon/polygon-edge/chain"
@@ -17,6 +19,7 @@ import (
 const (
 	configFlag                   = "config"
 	genesisFlag                  = "chain"
+	bootnodePathFlag             = "bootnodes"
 	dataDirFlag                  = "data-dir"
 	libp2pAddressFlag            = "libp2p"
 	prometheusAddressFlag        = "prometheus"
@@ -64,6 +67,7 @@ var (
 			Network:   &config.Network{},
 			TxPool:    &config.TxPool{},
 		},
+		logger: hclog.NewNullLogger(),
 	}
 )
 
@@ -75,6 +79,7 @@ var (
 type serverParams struct {
 	rawConfig  *config.Config
 	configPath string
+	logger     hclog.Logger
 
 	libp2pAddress     *net.TCPAddr
 	prometheusAddress *net.TCPAddr
@@ -89,8 +94,9 @@ type serverParams struct {
 
 	ibftBaseTimeoutLegacy uint64
 
-	genesisConfig *chain.Chain
-	secretsConfig *secrets.SecretsManagerConfig
+	genesisConfig  *chain.Chain
+	bootnodeConfig *chain.Bootnode
+	secretsConfig  *secrets.SecretsManagerConfig
 
 	logFileLocation string
 
@@ -151,24 +157,52 @@ func (p *serverParams) setJSONLogFormat(jsonLogFormat bool) {
 }
 
 func (p *serverParams) setGenesisFileFlag(genesisFlag string) error {
+	// If genesis flag is mainnet or testnet, use it directly
 	if genesisFlag == "mainnet" || genesisFlag == "testnet" {
+		p.rawConfig.GenesisFile = genesisFlag
+
 		return nil
 	}
 
+	// For custom genesis files, require explicit custom: prefix
 	const customPrefix = "custom:"
 	if !strings.HasPrefix(genesisFlag, customPrefix) {
-		return errInvalidGenesisFileFlag
+		return fmt.Errorf("%w. Got: %s", errInvalidGenesisFileFlag, genesisFlag)
 	}
 
+	// Extract the actual path after custom: prefix
 	actualPath := strings.TrimPrefix(genesisFlag, customPrefix)
+	if actualPath == "" {
+		return fmt.Errorf("custom genesis path cannot be empty")
+	}
+
 	p.rawConfig.GenesisFile = actualPath
 
 	return nil
 }
 
-func (p *serverParams) generateConfig() *server.Config {
+func (p *serverParams) generateConfig() (*server.Config, error) {
+	// Initialize network config
+	networkConfig := &network.Config{
+		NoDiscover:       p.rawConfig.Network.NoDiscover,
+		Addr:             p.libp2pAddress,
+		NatAddr:          p.natAddress,
+		DNS:              p.dnsAddress,
+		DataDir:          filepath.Join(p.rawConfig.DataDir, "libp2p"),
+		MaxPeers:         p.rawConfig.Network.MaxPeers,
+		MaxInboundPeers:  p.rawConfig.Network.MaxInboundPeers,
+		MaxOutboundPeers: p.rawConfig.Network.MaxOutboundPeers,
+		Chain:            p.genesisConfig,
+	}
+
+	// Set bootnodes from bootnodeConfig if available
+	if p.bootnodeConfig != nil {
+		networkConfig.Bootnodes = p.bootnodeConfig.Bootnodes
+	}
+
 	return &server.Config{
-		Chain: p.genesisConfig,
+		Chain:   p.genesisConfig,
+		Network: networkConfig,
 		JSONRPC: &server.JSONRPC{
 			JSONRPCAddr:              p.jsonRPCAddress,
 			AccessControlAllowOrigin: p.rawConfig.CorsAllowedOrigins,
@@ -182,31 +216,28 @@ func (p *serverParams) generateConfig() *server.Config {
 		Telemetry: &server.Telemetry{
 			PrometheusAddr: p.prometheusAddress,
 		},
-		Network: &network.Config{
-			NoDiscover:       p.rawConfig.Network.NoDiscover,
-			Addr:             p.libp2pAddress,
-			NatAddr:          p.natAddress,
-			DNS:              p.dnsAddress,
-			DataDir:          p.rawConfig.DataDir,
-			MaxPeers:         p.rawConfig.Network.MaxPeers,
-			MaxInboundPeers:  p.rawConfig.Network.MaxInboundPeers,
-			MaxOutboundPeers: p.rawConfig.Network.MaxOutboundPeers,
-			Chain:            p.genesisConfig,
-		},
-		DataDir:            p.rawConfig.DataDir,
-		Seal:               p.rawConfig.ShouldSeal,
-		PriceLimit:         p.rawConfig.TxPool.PriceLimit,
-		MaxSlots:           p.rawConfig.TxPool.MaxSlots,
-		MaxAccountEnqueued: p.rawConfig.TxPool.MaxAccountEnqueued,
-		SecretsManager:     p.secretsConfig,
-		RestoreFile:        p.getRestoreFilePath(),
-		LogLevel:           hclog.LevelFromString(p.rawConfig.LogLevel),
-		JSONLogFormat:      p.rawConfig.JSONLogFormat,
-		LogFilePath:        p.logFileLocation,
-
-		// Hydra modification: relayer must be disabled
+		DataDir:               p.rawConfig.DataDir,
+		PriceLimit:            p.rawConfig.TxPool.PriceLimit,
+		MaxSlots:              p.rawConfig.TxPool.MaxSlots,
+		MaxAccountEnqueued:    p.rawConfig.TxPool.MaxAccountEnqueued,
+		SecretsManager:        p.secretsConfig,
+		RestoreFile:           p.getRestoreFilePath(),
+		LogLevel:              hclog.LevelFromString(p.rawConfig.LogLevel),
+		JSONLogFormat:         p.rawConfig.JSONLogFormat,
+		LogFilePath:           p.logFileLocation,
 		Relayer:               false,
 		NumBlockConfirmations: p.rawConfig.NumBlockConfirmations,
 		MetricsInterval:       p.rawConfig.MetricsInterval,
+	}, nil
+}
+
+func init() {
+	params = &serverParams{
+		rawConfig: &config.Config{
+			Telemetry: &config.Telemetry{},
+			Network:   &config.Network{},
+			TxPool:    &config.TxPool{},
+		},
+		logger: hclog.NewNullLogger(),
 	}
 }
