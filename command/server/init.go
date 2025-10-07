@@ -339,7 +339,12 @@ func (p *serverParams) getBootnodeConfig() (*chain.Bootnode, error) {
 			defaultBootnodes = p.genesisConfig.Params.Bootnodes
 		}
 	} else {
-		// For custom networks, try to load from bootnode.json
+		// For custom networks, first load bootnodes from genesis params if present
+		if p.genesisConfig != nil && p.genesisConfig.Params != nil && len(p.genesisConfig.Params.Bootnodes) > 0 {
+			defaultBootnodes = append(defaultBootnodes, p.genesisConfig.Params.Bootnodes...)
+		}
+
+		// Then try to load additional bootnodes from adjacent bootnode.json
 		configPath := filepath.Join(filepath.Dir(p.rawConfig.GenesisFile), "bootnode.json")
 		if _, err := os.Stat(configPath); err == nil {
 			if data, err := os.ReadFile(configPath); err == nil {
@@ -352,7 +357,7 @@ func (p *serverParams) getBootnodeConfig() (*chain.Bootnode, error) {
 				}
 
 				if err := json.Unmarshal(data, &nodeConfig); err == nil {
-					defaultBootnodes = nodeConfig.Node.P2P.StaticNodes
+					defaultBootnodes = append(defaultBootnodes, nodeConfig.Node.P2P.StaticNodes...)
 				}
 			}
 		}
@@ -417,8 +422,8 @@ func (p *serverParams) getBootnodeConfig() (*chain.Bootnode, error) {
 	}
 
 	if len(allBootnodes) == 0 {
-		return nil, fmt.Errorf("no bootnodes found from any source. Please specify bootnodes via " +
-			"--bootnode-path, use mainnet/testnet, or ensure bootnode.json exists for custom networks")
+		return nil, fmt.Errorf("no bootnodes found. Provide them via genesis params.bootnodes, " +
+			"adjacent bootnode.json, or --bootnodes <./path/to/bootnode.json> or use mainnet/testnet")
 	}
 
 	return &chain.Bootnode{

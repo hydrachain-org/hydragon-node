@@ -512,9 +512,12 @@ func (s *Server) Peers() []*PeerConnInfo {
 
 	peers := make([]*PeerConnInfo, 0)
 	for id, connectionInfo := range s.peers {
-		s.logger.Info("Peers() entry", "peerID", id)
+		// Only include peers that are actually connected
+		if s.host.Network().Connectedness(id) == network.Connected {
+			s.logger.Info("Peers() entry", "peerID", id)
 
-		peers = append(peers, connectionInfo)
+			peers = append(peers, connectionInfo)
+		}
 	}
 
 	s.logger.Info("Peers to persist", "addrs", peers)
@@ -673,8 +676,16 @@ func (s *Server) Close() error {
 	addrs := []string{}
 
 	for _, p := range peers {
-		addrStr, err := common.AddrInfoToString(&p.Info)
-		if err == nil {
+		// Build a complete AddrInfo for the peer. The stored Info may not
+		// have addresses populated at shutdown, so pull from the peerstore.
+		addrInfo := peer.AddrInfo{ID: p.Info.ID, Addrs: p.Info.Addrs}
+		if len(addrInfo.Addrs) == 0 {
+			addrInfo.Addrs = s.host.Peerstore().Addrs(p.Info.ID)
+		}
+
+		// Only include peers that we can serialize into a multiaddr string
+		addrStr, err := common.AddrInfoToString(&addrInfo)
+		if err == nil && addrStr != "" {
 			addrs = append(addrs, addrStr)
 		}
 	}
