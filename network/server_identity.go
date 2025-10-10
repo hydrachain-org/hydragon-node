@@ -44,13 +44,12 @@ func (s *Server) AddPeer(id peer.ID, direction network.Direction) {
 	// WARNING: THIS CALL IS POTENTIALLY BLOCKING
 	s.emitEvent(id, peerEvent.PeerConnected)
 
-	// Add to lastKnownPeers
-	peerInfo := s.host.Peerstore().PeerInfo(id)
-	addrStr, err := common.AddrInfoToString(&peerInfo)
+	// Track seen peer and schedule persist
+	s.seenPeersLock.Lock()
+	s.seenPeers[id] = struct{}{}
+	s.seenPeersLock.Unlock()
 
-	if err == nil {
-		s.addPeerToLastKnown(addrStr)
-	}
+	s.triggerPersistPeers()
 }
 
 // addPeerInfo updates the networking server's internal peer info table

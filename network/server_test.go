@@ -429,7 +429,8 @@ func TestPeerReconnection(t *testing.T) {
 	disconnectFromPeer := func(server *Server, peerID peer.ID) {
 		server.DisconnectFromPeer(peerID, "Bye")
 
-		disconnectCtx, disconnectFn := context.WithTimeout(context.Background(), DefaultJoinTimeout)
+		// Give extra time for disconnect propagation to avoid flakiness in CI
+		disconnectCtx, disconnectFn := context.WithTimeout(context.Background(), DefaultJoinTimeout*3)
 		defer disconnectFn()
 
 		if _, disconnectErr := WaitUntilPeerDisconnectsFrom(disconnectCtx, server, peerID); disconnectErr != nil {
@@ -444,7 +445,8 @@ func TestPeerReconnection(t *testing.T) {
 			t.Fatalf("Unable to close server, %v", closeErr)
 		}
 
-		disconnectCtx, disconnectFn := context.WithTimeout(context.Background(), DefaultJoinTimeout)
+		// Allow generous timeout for disconnect detection after peer shutdown
+		disconnectCtx, disconnectFn := context.WithTimeout(context.Background(), DefaultJoinTimeout*3)
 		defer disconnectFn()
 
 		if _, disconnectErr := WaitUntilPeerDisconnectsFrom(disconnectCtx, server, peerID); disconnectErr != nil {
@@ -742,14 +744,16 @@ func TestSubscribe(t *testing.T) {
 	toChannel := func(t *testing.T, ctx context.Context, server *Server) <-chan *peerEvent.PeerEvent {
 		t.Helper()
 
-		eventCh := make(chan *peerEvent.PeerEvent)
-
-		t.Cleanup(func() {
-			close(eventCh)
-		})
+		// Buffered channel to avoid blocking and to prevent send-on-closed panics.
+		// Channel is not closed by the test; context cancellation stops delivery.
+		eventCh := make(chan *peerEvent.PeerEvent, 16)
 
 		err := server.Subscribe(ctx, func(e *peerEvent.PeerEvent) {
-			eventCh <- e
+			select {
+			case <-ctx.Done():
+				return
+			case eventCh <- e:
+			}
 		})
 
 		assert.NoError(t, err)

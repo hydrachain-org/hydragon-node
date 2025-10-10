@@ -92,13 +92,21 @@ type Server struct {
 
 	bootnodes *bootnodesWrapper // reference of all bootnodes for the node
 
-	lastKnownPeers []string // list of peer addresses (as strings) that were last known to be connected.
-
-	lastKnownPeersLock sync.Mutex // a mutex to protect concurrent access to lastKnownPeers.
-
 	failedBootnodeIDs    map[peer.ID]struct{} // track failed bootnode connection attempts
 	bootnodeFallbackUsed bool                 // ensure fallback only happens once per startup
 	bootnodeFallbackLock sync.Mutex           // lock for fallback logic
+
+	// isShuttingDown indicates the server is in shutdown sequence.
+	// Prevents background writers from overwriting last_peers.json during Close().
+	isShuttingDown bool
+
+	// seenPeers tracks all peers observed during runtime for inactive fallback ordering.
+	seenPeers     map[peer.ID]struct{}
+	seenPeersLock sync.Mutex
+
+	// persist debounce state for writing last_peers.json at runtime.
+	persistMu    sync.Mutex
+	persistTimer *time.Timer
 }
 
 // NewServer returns a new instance of the networking server
@@ -166,6 +174,7 @@ func NewServer(logger hclog.Logger, config *Config) (*Server, error) {
 			config.MaxOutboundPeers,
 		),
 		failedBootnodeIDs: make(map[peer.ID]struct{}),
+		seenPeers:         make(map[peer.ID]struct{}),
 	}
 
 	// start gossip protocol
@@ -568,10 +577,8 @@ func (s *Server) removePeer(peerID peer.ID) {
 	s.emitEvent(peerID, peerEvent.PeerDisconnected)
 
 	// Remove from lastKnownPeers
-	addrStr, err := common.AddrInfoToString(&connectionInfo.Info)
-	if err == nil {
-		s.removePeerFromLastKnown(addrStr)
-	}
+	// Note: we no longer update lastKnownPeers; schedule persist to reflect active-only ordering
+	s.triggerPersistPeers()
 }
 
 // removePeerInfo removes (pops) peer connection info from the networking
@@ -672,39 +679,11 @@ func (s *Server) joinPeer(peerInfo *peer.AddrInfo) {
 func (s *Server) Close() error {
 	s.logger.Info("Persisting peers to last_peers.json on shutdown")
 
-	peers := s.Peers()
-	addrs := []string{}
+	// Guard against background writers overriding last_peers.json
+	s.isShuttingDown = true
 
-	for _, p := range peers {
-		// Build a complete AddrInfo for the peer. The stored Info may not
-		// have addresses populated at shutdown, so pull from the peerstore.
-		addrInfo := peer.AddrInfo{ID: p.Info.ID, Addrs: p.Info.Addrs}
-		if len(addrInfo.Addrs) == 0 {
-			addrInfo.Addrs = s.host.Peerstore().Addrs(p.Info.ID)
-		}
-
-		// Only include peers that we can serialize into a multiaddr string
-		addrStr, err := common.AddrInfoToString(&addrInfo)
-		if err == nil && addrStr != "" {
-			addrs = append(addrs, addrStr)
-		}
-	}
-
-	if len(addrs) > 0 {
-		data, err := json.MarshalIndent(addrs, "", "  ")
-
-		if err != nil {
-			s.logger.Warn("Failed to marshal peers for persistence", "err", err)
-		} else {
-			filePath := filepath.Join(s.config.DataDir, "last_peers.json")
-			s.logger.Info("Writing last_peers.json", "file", filePath, "peers", addrs)
-			err = os.WriteFile(filePath, data, 0600)
-
-			if err != nil {
-				s.logger.Warn("Failed to persist peers to last_peers.json", "err", err)
-			}
-		}
-	}
+	// Do a final persist (active-first ordering will be produced by the debounced writer)
+	s.persistPeersNow()
 
 	err := s.host.Close()
 	s.dialQueue.Close()
@@ -873,56 +852,102 @@ func (s *Server) updatePendingConnCountMetrics(direction network.Direction) {
 	}
 }
 
-func (s *Server) addPeerToLastKnown(addr string) {
-	s.lastKnownPeersLock.Lock()
-	defer s.lastKnownPeersLock.Unlock()
-
-	for _, a := range s.lastKnownPeers {
-		if a == addr {
-			return // already present
-		}
-	}
-
-	s.lastKnownPeers = append(s.lastKnownPeers, addr)
-
-	s.persistLastKnownPeers()
-}
-
-func (s *Server) removePeerFromLastKnown(addr string) {
-	s.lastKnownPeersLock.Lock()
-	defer s.lastKnownPeersLock.Unlock()
-	newPeers := make([]string, 0, len(s.lastKnownPeers))
-
-	for _, a := range s.lastKnownPeers {
-		if a != addr {
-			newPeers = append(newPeers, a)
-		}
-	}
-
-	s.lastKnownPeers = newPeers
-	s.persistLastKnownPeers()
-}
-
-func (s *Server) persistLastKnownPeers() {
-	if len(s.lastKnownPeers) == 0 {
+func (s *Server) triggerPersistPeers() {
+	if s.isShuttingDown {
 		return
 	}
 
-	data, err := json.MarshalIndent(s.lastKnownPeers, "", "  ")
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
 
+	if s.persistTimer != nil {
+		s.persistTimer.Stop()
+	}
+
+	// debounce 1s
+	s.persistTimer = time.AfterFunc(time.Second, func() {
+		s.persistPeersNow()
+	})
+}
+
+func (s *Server) persistPeersNow() {
+	// Build active-first then inactive (seen minus active)
+	activeInfos := s.Peers()
+	activeSet := make(map[peer.ID]struct{}, len(activeInfos))
+	activeAddrs := make([]string, 0, len(activeInfos))
+
+	for _, p := range activeInfos {
+		activeSet[p.Info.ID] = struct{}{}
+		addrInfo := peer.AddrInfo{ID: p.Info.ID, Addrs: p.Info.Addrs}
+
+		if len(addrInfo.Addrs) == 0 {
+			addrInfo.Addrs = s.host.Peerstore().Addrs(p.Info.ID)
+		}
+
+		if addrStr, err := common.AddrInfoToString(&addrInfo); err == nil && addrStr != "" {
+			activeAddrs = append(activeAddrs, addrStr)
+		}
+	}
+
+	inactiveAddrs := make([]string, 0)
+	{
+		s.seenPeersLock.Lock()
+		for id := range s.seenPeers {
+			if _, ok := activeSet[id]; ok {
+				continue
+			}
+
+			addrInfo := s.host.Peerstore().PeerInfo(id)
+			if addrStr, err := common.AddrInfoToString(&addrInfo); err == nil && addrStr != "" {
+				inactiveAddrs = append(inactiveAddrs, addrStr)
+			}
+		}
+		s.seenPeersLock.Unlock()
+	}
+
+	// cap total
+	const maxPeersToPersist = 200
+
+	ordered := make([]string, 0, len(activeAddrs)+len(inactiveAddrs))
+	ordered = append(ordered, activeAddrs...)
+
+	for _, a := range inactiveAddrs {
+		if len(ordered) >= maxPeersToPersist {
+			break
+		}
+
+		// dedupe
+		dup := false
+
+		for _, existing := range ordered {
+			if existing == a {
+				dup = true
+
+				break
+			}
+		}
+
+		if !dup {
+			ordered = append(ordered, a)
+		}
+	}
+
+	data, err := json.MarshalIndent(ordered, "", "  ")
 	if err != nil {
-		s.logger.Warn("Failed to marshal lastKnownPeers", "err", err)
+		s.logger.Warn("Failed to marshal peers for persistence", "err", err)
 
 		return
 	}
 
 	filePath := filepath.Join(s.config.DataDir, "last_peers.json")
-	s.logger.Info("Persisting lastKnownPeers to file", "file", filePath, "peers", s.lastKnownPeers)
+	if s.isShuttingDown {
+		s.logger.Info("Writing last_peers.json (shutdown)", "file", filePath, "peers", ordered)
+	} else {
+		s.logger.Info("Writing last_peers.json (runtime)", "file", filePath, "peers", ordered)
+	}
 
-	err = os.WriteFile(filePath, data, 0600)
-
-	if err != nil {
-		s.logger.Warn("Failed to persist lastKnownPeers to file", "err", err)
+	if err := os.WriteFile(filePath, data, 0600); err != nil {
+		s.logger.Warn("Failed to persist peers to last_peers.json", "err", err)
 	}
 }
 
