@@ -351,17 +351,17 @@ func TestPeerConnectionUpdateEventCh(t *testing.T) {
 	pushSubscription(subscription1, peerLatest1)
 	pushSubscription(subscription2, peerLatest2)
 
-    // wait until 2 messages are propagated
-    wgForGossip.Wait()
+	// wait until 2 messages are propagated
+	wgForGossip.Wait()
 
-    // wait until one status is collected (client connects only to peer1)
-    require.Eventually(t, func() bool { return len(newStatuses) == 1 }, 2*time.Second, 20*time.Millisecond)
+	// wait until one status is collected (client connects only to peer1)
+	require.Eventually(t, func() bool { return len(newStatuses) == 1 }, 2*time.Second, 20*time.Millisecond)
 
-    // close to terminate goroutine
-    client.Close()
+	// close to terminate goroutine
+	client.Close()
 
-    // wait until collecting routine is done
-    wgForConnectingStatus.Wait()
+	// wait until collecting routine is done
+	wgForConnectingStatus.Wait()
 
 	// client connects to only peer1, then expects to have a status from peer1
 	expected := []*NoForkPeer{

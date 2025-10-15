@@ -15,6 +15,7 @@ import (
 	"github.com/0xPolygon/polygon-edge/network/common"
 
 	"github.com/0xPolygon/polygon-edge/chain"
+	publicconfigs "github.com/0xPolygon/polygon-edge/chain/public-configs"
 	"github.com/0xPolygon/polygon-edge/command/helper"
 	"github.com/0xPolygon/polygon-edge/network"
 	"github.com/0xPolygon/polygon-edge/secrets"
@@ -23,6 +24,10 @@ import (
 
 var (
 	errDataDirectoryUndefined = errors.New("data directory not defined")
+
+	// Network constants
+	mainnetNetwork = "mainnet"
+	testnetNetwork = "testnet"
 )
 
 func (p *serverParams) initConfigFromFile() error {
@@ -331,12 +336,51 @@ func (p *serverParams) getBootnodeConfig() (*chain.Bootnode, error) {
 	var userBootnodes []string
 
 	// 1. Load default bootnodes (mainnet/testnet or bootnode.json)
-	if p.rawConfig.GenesisFile == "mainnet" || p.rawConfig.GenesisFile == "testnet" {
+	if p.rawConfig.GenesisFile == mainnetNetwork || p.rawConfig.GenesisFile == testnetNetwork {
 		// The bootnodes will be loaded from the chain config for mainnet/testnet
 		p.logger.Info("Using default bootnodes for", "network", p.rawConfig.GenesisFile)
 
 		if p.genesisConfig != nil && p.genesisConfig.Params != nil {
 			defaultBootnodes = p.genesisConfig.Params.Bootnodes
+
+			// Also parse top-level bootnodes from embedded genesis JSON
+			var topLevel struct {
+				Bootnodes []string `json:"bootnodes"`
+			}
+
+			var embed []byte
+			if p.rawConfig.GenesisFile == mainnetNetwork {
+				embed = publicconfigs.GetMainnetGenesis()
+			} else {
+				embed = publicconfigs.GetTestnetGenesis()
+			}
+
+			if err := json.Unmarshal(embed, &topLevel); err == nil && len(topLevel.Bootnodes) > 0 {
+				defaultBootnodes = append(defaultBootnodes, topLevel.Bootnodes...)
+			}
+		}
+		// Also support adjacent geth-style bootnode.json for mainnet/testnet
+		// Try a couple of common locations: current working directory and data-dir
+		candidatePaths := []string{
+			"bootnode.json",
+			filepath.Join(p.rawConfig.DataDir, "bootnode.json"),
+		}
+		for _, configPath := range candidatePaths {
+			if _, err := os.Stat(configPath); err == nil {
+				if data, err := os.ReadFile(configPath); err == nil {
+					var nodeConfig struct {
+						Node struct {
+							P2P struct {
+								StaticNodes []string `json:"staticNodes"`
+							} `json:"p2p"`
+						} `json:"node"`
+					}
+
+					if err := json.Unmarshal(data, &nodeConfig); err == nil && len(nodeConfig.Node.P2P.StaticNodes) > 0 {
+						defaultBootnodes = append(defaultBootnodes, nodeConfig.Node.P2P.StaticNodes...)
+					}
+				}
+			}
 		}
 	} else {
 		// For custom networks, first load bootnodes from genesis params if present
@@ -344,20 +388,40 @@ func (p *serverParams) getBootnodeConfig() (*chain.Bootnode, error) {
 			defaultBootnodes = append(defaultBootnodes, p.genesisConfig.Params.Bootnodes...)
 		}
 
-		// Then try to load additional bootnodes from adjacent bootnode.json
-		configPath := filepath.Join(filepath.Dir(p.rawConfig.GenesisFile), "bootnode.json")
-		if _, err := os.Stat(configPath); err == nil {
-			if data, err := os.ReadFile(configPath); err == nil {
-				var nodeConfig struct {
-					Node struct {
-						P2P struct {
-							StaticNodes []string `json:"staticNodes"`
-						} `json:"p2p"`
-					} `json:"node"`
+		// Also parse top-level bootnodes directly from the custom genesis JSON
+		if p.rawConfig.GenesisFile != "" {
+			if data, err := os.ReadFile(p.rawConfig.GenesisFile); err == nil {
+				var topLevel struct {
+					Bootnodes []string `json:"bootnodes"`
 				}
 
-				if err := json.Unmarshal(data, &nodeConfig); err == nil {
-					defaultBootnodes = append(defaultBootnodes, nodeConfig.Node.P2P.StaticNodes...)
+				if err := json.Unmarshal(data, &topLevel); err == nil && len(topLevel.Bootnodes) > 0 {
+					defaultBootnodes = append(defaultBootnodes, topLevel.Bootnodes...)
+				}
+			}
+		}
+
+		// Then try to load additional bootnodes from adjacent bootnode.json
+		candidatePaths := []string{
+			filepath.Join(filepath.Dir(p.rawConfig.GenesisFile), "bootnode.json"),
+			// also check current directory and data dir for convenience
+			"bootnode.json",
+			filepath.Join(p.rawConfig.DataDir, "bootnode.json"),
+		}
+		for _, configPath := range candidatePaths {
+			if _, err := os.Stat(configPath); err == nil {
+				if data, err := os.ReadFile(configPath); err == nil {
+					var nodeConfig struct {
+						Node struct {
+							P2P struct {
+								StaticNodes []string `json:"staticNodes"`
+							} `json:"p2p"`
+						} `json:"node"`
+					}
+
+					if err := json.Unmarshal(data, &nodeConfig); err == nil && len(nodeConfig.Node.P2P.StaticNodes) > 0 {
+						defaultBootnodes = append(defaultBootnodes, nodeConfig.Node.P2P.StaticNodes...)
+					}
 				}
 			}
 		}
@@ -370,15 +434,23 @@ func (p *serverParams) getBootnodeConfig() (*chain.Bootnode, error) {
 			return nil, fmt.Errorf("failed to read bootnode config file %s: %w", p.rawConfig.BootnodePath, err)
 		}
 
-		var bootnodeConfig struct {
-			Bootnodes []string `json:"bootnodes"`
+		// Accept only geth-style schema: { "node": { "p2p": { "staticNodes": [ ... ] } } }
+		var gethStyle struct {
+			Node struct {
+				P2P struct {
+					StaticNodes []string `json:"staticNodes"`
+				} `json:"p2p"`
+			} `json:"node"`
 		}
 
-		if err := json.Unmarshal(data, &bootnodeConfig); err != nil {
-			return nil, fmt.Errorf("failed to parse bootnode config file %s: %w", p.rawConfig.BootnodePath, err)
+		if err := json.Unmarshal(data, &gethStyle); err == nil && len(gethStyle.Node.P2P.StaticNodes) > 0 {
+			userBootnodes = gethStyle.Node.P2P.StaticNodes
+		} else {
+			return nil, fmt.Errorf(
+				"failed to parse bootnode config file %s: expected geth-style node.p2p.staticNodes",
+				p.rawConfig.BootnodePath,
+			)
 		}
-
-		userBootnodes = bootnodeConfig.Bootnodes
 	}
 
 	// 3. Merge default and user bootnodes, removing duplicates
@@ -418,6 +490,56 @@ func (p *serverParams) getBootnodeConfig() (*chain.Bootnode, error) {
 		allBootnodes = make([]string, 0, len(bootnodeSet))
 		for b := range bootnodeSet {
 			allBootnodes = append(allBootnodes, b)
+		}
+	}
+
+	// 5. Persist bootnodes to geth-style bootnode.json if not present yet
+	if len(allBootnodes) > 0 {
+		// Prepare geth-style schema
+		type p2pCfg struct {
+			StaticNodes []string `json:"staticNodes"`
+		}
+
+		type nodeCfg struct {
+			P2P p2pCfg `json:"p2p"`
+		}
+
+		type outCfg struct {
+			Node nodeCfg `json:"node"`
+			JSON struct {
+				Enabled bool `json:"enabled"`
+			} `json:"json"`
+		}
+
+		writeIfMissing := func(path string) {
+			if path == "" {
+				return
+			}
+
+			if _, err := os.Stat(path); err == nil {
+				return
+			}
+
+			cfg := outCfg{}
+			cfg.Node.P2P.StaticNodes = allBootnodes
+			cfg.JSON.Enabled = false
+
+			if f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644); err == nil {
+				enc := json.NewEncoder(f)
+				enc.SetIndent("", "  ")
+				_ = enc.Encode(&cfg)
+				_ = f.Close()
+			}
+		}
+
+		// Always try to place in data dir
+		writeIfMissing(filepath.Join(p.rawConfig.DataDir, "bootnode.json"))
+
+		// For custom genesis, also try adjacent to the genesis file
+		if p.rawConfig.GenesisFile != "" &&
+			p.rawConfig.GenesisFile != mainnetNetwork &&
+			p.rawConfig.GenesisFile != testnetNetwork {
+			writeIfMissing(filepath.Join(filepath.Dir(p.rawConfig.GenesisFile), "bootnode.json"))
 		}
 	}
 
