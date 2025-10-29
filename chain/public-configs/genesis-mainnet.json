@@ -269,10 +269,10 @@
     "burnContractDestinationAddress": "0x0000000000000000000000000000000000000000"
   },
   "bootnodes": [
-    "/ip4/95.179.238.207/tcp/1478/p2p/16Uiu2HAmNT31vkrnmeJFWvPGC8P7HttAACA4XXjUysDEAaRXWYSx",
-    "/ip4/45.77.0.250/tcp/1478/p2p/16Uiu2HAmCBseXhnRCjdoLXv9mHQpWFGCMMtKWbYKrqV52pzL53gD",
-    "/ip4/45.32.157.112/tcp/1478/p2p/16Uiu2HAkxxcdh3JJ3mv72vjRpwt5DgDE3erVZJ8DmTvcFM1c7ESS",
-    "/ip4/108.61.209.9/tcp/1478/p2p/16Uiu2HAmAKCms8gyUqwWn1wyY79Bnk7y3BSBapgj5CrDEDKNjGgw",
-    "/ip4/149.28.145.157/tcp/1478/p2p/16Uiu2HAmLHqaEdRYVCEWdnD8n5vbuC4pF4th58sErdFH7q9FoYew"
+    "/ip4/152.53.228.115/tcp/1478/p2p/16Uiu2HAkvmtydLiP8ceT9peFaKxbFmXeCWNRcgWR3rqFyzPH9Ljo",
+    "/ip4/152.53.255.164/tcp/1478/p2p/16Uiu2HAm2SBddJ34rKVVZbvKaL4Tt3sB2MaiHCPjRnAoVypkRrWz",
+    "/ip4/152.53.140.123/tcp/1478/p2p/16Uiu2HAmBNwFJQ8ypMkvSytyfqeASWbv7siqaXTW3SYhjr7ZqEKk",
+    "/ip4/152.53.117.165/tcp/1478/p2p/16Uiu2HAmCBseXhnRCjdoLXv9mHQpWFGCMMtKWbYKrqV52pzL53gD",
+    "/ip4/193.31.25.223/tcp/1478/p2p/16Uiu2HAkxxcdh3JJ3mv72vjRpwt5DgDE3erVZJ8DmTvcFM1c7ESS"
   ]
 }
