@@ -130,7 +130,7 @@ For more details on available commands and their usage, you can append the `--he
 
 The genesis.json file is crucial, containing details about the genesis block and node configurations.
 **Important: Do not alter this file to avoid potential loss of funds.**
-Future releases will automate this configuration. You can find the HydraChain genesis file in the extracted folder containing the [release assets](#executable) and place it in your node directory.
+In the new releases, the genesis file is built into the hydra executable and as such does not need a custom Genesis file. For visibility, you can find the latest HydraChain genesis file at the following location https://github.com/Hydra-Chain/hydragon-node/blob/testnet/chain/public-configs/genesis-mainnet.json.
 
 #### Secrets Configuration File
 
@@ -165,9 +165,9 @@ After your node is operational and fully synced, you're ready to become a valida
 
 ### Register account as validator and stake
 
-Hydra's validator set is unique as it offers a permissionless opportunity on a first come/first serve. It supports up to 150 validators and uses exponentiating formula to ensure consolidation is countered for a maximum Nakamoto Coefficient. The requirements to become a validator: a) to have a minimum of 15,000 HYDRA and b) there to be vacant slots in the validator sets. Inactive validators are going to be ejected after approximately 1 hours of inactivity and permanently banned after additional 24 hours if the ban process is not terminated (See the [Ban Validator](#ban-validator) section for more details.) in order to ensure fair environment and highest level of network security.
+Hydra's validator set is unique as it offers a permissionless opportunity on a first come/first serve. It supports up to 50 validators on the Main Shard and uses an exponentiating formula to ensure consolidation is countered for a maximum Nakamoto Coefficient. The requirements to become a validator: a) to have a minimum of 15,000 HYDRA and b) there to be vacant slots in the validator sets. Inactive validators are going to be temporarily ejected after approximately 2 hours of inactivity (18,000 Blocks) and permanently banned after additional 72 hours if the ban process is not terminated (See the [Ban Validator](#ban-validator) section for more details.) in order to ensure fair environment and highest level of network security.
 
-After ensuring you have a minimum of 15,000 HYDRA in your validator wallet, you can execute the following command.
+After ensuring you have a minimum of 15,000 HYDRA in your validator wallet (and some extra for gas fees), you can execute the following command.
 
 ```
 hydra hydragon register-validator --data-dir ./node-secrets --stake 15000000000000000000000 --commission 10 --jsonrpc http://localhost:8545
@@ -238,7 +238,7 @@ hydra hydragon commission --data-dir ./node-secrets --claim true --jsonrpc http:
 To reduce the risk of stalling caused by validators experiencing temporary issues or acting maliciously, we’ve implemented an ejection and ban mechanism. Anyone who recongizes a suspicious activity, and the rules are met, can execute the ban process. Below is an outline of how the system works (specific conditions are detailed in our [genesis contracts](https://github.com/Hydra-Chain/hydragon-core-contracts)):
 
 1. **Initial Ejection**: If your validator stops proposing or participating in consensus whether due to hardware failure, software issues, or malicious intent—the ban procedure will be initiated. The validator will be ejected, allowing time for recovery. If no action is taken, a ban may follow. The threshold to trigger this process is initially set at 18,000 blocks (~2 hours), depending on block creation speed.
-2. **Ban Procedure**: After ejection, you can rejoin by resolving the issue and running the appropriate command (explained [below](#re-activate)). However, if you fail to act within the final threshold (86,400 seconds or ~24 hours), your validator will be permanently banned. This will result in a penalty (currently 1,000 HYDRA) , of which 700 HYDRA will be burned and a small reward for the reporter (currently 300 HYDRA; applied only if ban is executed by reporter different than the Governance), and the remaining funds being prepared for withdrawal.
+2. **Ban Procedure**: After ejection, you can rejoin by resolving the issue and running the appropriate command (explained [below](#re-activate)). However, if you fail to act within the final threshold (259,200 seconds or ~72 hours), your validator will be permanently banned. This will result in a penalty (currently 1,000 HYDRA) , of which 700 HYDRA will be burned and a small reward for the reporter (currently 300 HYDRA; applied only if ban is executed by reporter different than the Governance), and the remaining funds being prepared for withdrawal.
 
 #### Re-activate
 
@@ -395,4 +395,4 @@ You'll also see the potential APR calculated based on the vesting period, or you
 
 - The process for pending transactions and confirmations remains the same. Once the transaction is confirmed, the table will be updated to reflect the remaining staked amount, if any."
 
-- When a position is undelegated, the system will register a withdrawal on the blockchain and the user will have to wait for the withdrawal period, which currently is 1 epoch. Under the Delegation Info sections, there is a table that will show all available withdrawables once the period of 1 epoch has passed. In the `Actions` section, the user will be able to `Withdraw` the amount at any time.
+- When a position is undelegated, the system will register a withdrawal on the blockchain and the user will have to wait for the withdrawal period, which currently is 7 days. Under the Delegation Info sections, there is a table that will show all available withdrawables with pending duration once the period of 7 days has passed. In the `Actions` section, the user will be able to `Withdraw` the amount at any time.
