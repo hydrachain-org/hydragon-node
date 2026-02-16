@@ -3,7 +3,6 @@ package vestingstatus
 import (
 	"fmt"
 	"math/big"
-	"time"
 
 	"github.com/0xPolygon/polygon-edge/command"
 	"github.com/0xPolygon/polygon-edge/command/helper"
@@ -21,10 +20,10 @@ import (
 var (
 	params vestingStatusParams
 
-	vestedStakingPositionsFn     = contractsapi.HydraStaking.Abi.GetMethod("vestedStakingPositions")
-	calculatePositionTotalReward = contractsapi.HydraStaking.Abi.GetMethod("calculatePositionTotalReward")
-	unclaimedRewardsFn           = contractsapi.HydraStaking.Abi.GetMethod("unclaimedRewards")
-	distributedCommissionsFn     = contractsapi.HydraDelegation.Abi.GetMethod("distributedCommissions")
+	vestedStakingPositionsFn       = contractsapi.HydraStaking.Abi.Methods["vestedStakingPositions"]
+	calculatePositionTotalRewardFn = contractsapi.HydraStaking.Abi.Methods["calculatePositionTotalReward"]
+	unclaimedRewardsFn             = contractsapi.HydraStaking.Abi.Methods["unclaimedRewards"]
+	distributedCommissionsFn       = contractsapi.HydraDelegation.Abi.Methods["distributedCommissions"]
 )
 
 func GetCommand() *cobra.Command {
@@ -86,12 +85,23 @@ func runCommand(cmd *cobra.Command, _ []string) error {
 
 	txRelayer, err := txrelayer.NewTxRelayer(
 		txrelayer.WithIPAddress(params.jsonRPC),
-		txrelayer.WithReceiptTimeout(150*time.Millisecond),
 	)
 	if err != nil {
 		return err
 	}
 
+	result, err := getVestingStatus(txRelayer, validatorAddr)
+	if err != nil {
+		return err
+	}
+
+	outputter.WriteCommandResult(result)
+
+	return nil
+}
+
+// getVestingStatus queries all vesting-related contract state for a validator and returns the result.
+func getVestingStatus(txRelayer txrelayer.TxRelayer, validatorAddr ethgo.Address) (*vestingStatusResult, error) {
 	result := &vestingStatusResult{
 		ValidatorAddress: validatorAddr.String(),
 	}
@@ -99,7 +109,7 @@ func runCommand(cmd *cobra.Command, _ []string) error {
 	// 1. Query vestedStakingPositions from HydraStaking
 	vestingPosition, err := queryVestedStakingPositions(txRelayer, validatorAddr)
 	if err != nil {
-		return fmt.Errorf("failed to query vesting position: %w", err)
+		return nil, fmt.Errorf("failed to query vesting position: %w", err)
 	}
 
 	duration := vestingPosition["duration"].(*big.Int)     //nolint:forcetypeassert
@@ -122,11 +132,11 @@ func runCommand(cmd *cobra.Command, _ []string) error {
 	// 2. Query calculatePositionTotalReward from HydraStaking
 	totalReward, err := querySingleUint256(
 		txRelayer, validatorAddr,
-		calculatePositionTotalReward,
+		calculatePositionTotalRewardFn,
 		(ethgo.Address)(contracts.HydraStakingContract),
 	)
 	if err != nil {
-		return fmt.Errorf("failed to query total reward: %w", err)
+		return nil, fmt.Errorf("failed to query total reward: %w", err)
 	}
 
 	result.GeneratedRewards = formatWei(totalReward)
@@ -138,26 +148,26 @@ func runCommand(cmd *cobra.Command, _ []string) error {
 		(ethgo.Address)(contracts.HydraStakingContract),
 	)
 	if err != nil {
-		return fmt.Errorf("failed to query unclaimed rewards: %w", err)
+		return nil, fmt.Errorf("failed to query unclaimed rewards: %w", err)
 	}
 
 	result.ClaimableRewards = formatWei(unclaimed)
 
 	// 4. Query distributedCommissions from HydraDelegation
+	// Note: distributedCommissions returns the currently claimable (pending) commissions,
+	// not the total historical commissions ever distributed.
 	commissions, err := querySingleUint256(
 		txRelayer, validatorAddr,
 		distributedCommissionsFn,
 		(ethgo.Address)(contracts.HydraDelegationContract),
 	)
 	if err != nil {
-		return fmt.Errorf("failed to query distributed commissions: %w", err)
+		return nil, fmt.Errorf("failed to query distributed commissions: %w", err)
 	}
 
 	result.ClaimableCommissions = formatWei(commissions)
 
-	outputter.WriteCommandResult(result)
-
-	return nil
+	return result, nil
 }
 
 // queryVestedStakingPositions calls the vestedStakingPositions view function on HydraStaking

@@ -66,6 +66,7 @@ func (vr vestingStatusResult) GetOutput() string {
 
 		vals := []string{
 			fmt.Sprintf("Validator Address|%s", vr.ValidatorAddress),
+			fmt.Sprintf("Generated Rewards (wei)|%s", vr.GeneratedRewards),
 			fmt.Sprintf("Claimable Rewards (wei)|%s", vr.ClaimableRewards),
 			fmt.Sprintf("Claimable Commissions (wei)|%s", vr.ClaimableCommissions),
 		}
