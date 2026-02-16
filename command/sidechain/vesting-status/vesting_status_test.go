@@ -89,13 +89,13 @@ func Test_queryVestedStakingPositions_ActivePosition(t *testing.T) {
 	relayer := new(mockTxRelayer)
 
 	response := encodeVestingPosition(t,
-		big.NewInt(52),        // duration
+		big.NewInt(52),         // duration
 		big.NewInt(1700000000), // start
 		big.NewInt(1731536000), // end
-		big.NewInt(1000),      // base
-		big.NewInt(500),       // vestBonus
-		big.NewInt(200),       // rsiBonus
-		big.NewInt(10),        // commission
+		big.NewInt(1000),       // base
+		big.NewInt(500),        // vestBonus
+		big.NewInt(200),        // rsiBonus
+		big.NewInt(10),         // commission
 	)
 
 	relayer.On("Call", mock.Anything, mock.Anything, mock.Anything).Return(response, nil).Once()
