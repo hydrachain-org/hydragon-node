@@ -121,7 +121,9 @@ func getVestingStatus(txRelayer txrelayer.TxRelayer, validatorAddr ethgo.Address
 	commission := vestingPosition["commission"].(*big.Int) //nolint:forcetypeassert
 
 	result.IsActiveVestingPosition = start.Sign() > 0
-	result.VestingDuration = duration.String()
+	// Contract stores duration in seconds (durationWeeks * 1 weeks); convert back to weeks
+	durationWeeks := new(big.Int).Div(duration, big.NewInt(604800))
+	result.VestingDuration = durationWeeks.String()
 	result.VestingStart = formatTimestamp(start)
 	result.VestingEnd = formatTimestamp(end)
 	result.BaseStake = formatWei(base)

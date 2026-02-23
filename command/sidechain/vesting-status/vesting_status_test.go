@@ -205,8 +205,9 @@ func Test_getVestingStatus_ActivePosition(t *testing.T) {
 	relayer := new(mockTxRelayer)
 
 	// 1. vestedStakingPositions → active position
+	// Contract stores duration in seconds: 52 weeks * 604800 = 31449600
 	vestingResp := encodeVestingPosition(t,
-		big.NewInt(52),
+		big.NewInt(31449600),
 		big.NewInt(1700000000),
 		big.NewInt(1731536000),
 		big.NewInt(1000),
