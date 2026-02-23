@@ -33,7 +33,6 @@ type vestingStatusResult struct {
 	BaseStake               string `json:"baseStake"`
 	VestBonus               string `json:"vestBonus"`
 	RSIBonus                string `json:"rsiBonus"`
-	VestingCommission       string `json:"vestingCommission"`
 	GeneratedRewards        string `json:"generatedRewards"`
 	ClaimableRewards        string `json:"claimableRewards"`
 	ClaimableCommissions    string `json:"claimableCommissions"`
@@ -87,7 +86,6 @@ func (vr vestingStatusResult) GetOutput() string {
 		fmt.Sprintf("Base Stake (wei)|%s", vr.BaseStake),
 		fmt.Sprintf("Vest Bonus (wei)|%s", vr.VestBonus),
 		fmt.Sprintf("RSI Bonus (wei)|%s", vr.RSIBonus),
-		fmt.Sprintf("Vesting Commission|%s", vr.VestingCommission),
 		fmt.Sprintf("Generated Rewards (wei)|%s", vr.GeneratedRewards),
 		fmt.Sprintf("Claimable Rewards (wei)|%s", vr.ClaimableRewards),
 		fmt.Sprintf("Claimable Commissions (wei)|%s", vr.ClaimableCommissions),

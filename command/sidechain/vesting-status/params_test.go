@@ -141,7 +141,6 @@ func Test_GetOutput_ActivePosition(t *testing.T) {
 		BaseStake:               "1000000000000000000",
 		VestBonus:               "500000000000000000",
 		RSIBonus:                "200000000000000000",
-		VestingCommission:       "10",
 		GeneratedRewards:        "300000000000000000",
 		ClaimableRewards:        "100000000000000000",
 		ClaimableCommissions:    "50000000000000000",

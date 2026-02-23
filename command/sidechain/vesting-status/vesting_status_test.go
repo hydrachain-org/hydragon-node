@@ -242,7 +242,6 @@ func Test_getVestingStatus_ActivePosition(t *testing.T) {
 	assert.Equal(t, "1000", result.BaseStake)
 	assert.Equal(t, "500", result.VestBonus)
 	assert.Equal(t, "200", result.RSIBonus)
-	assert.Equal(t, "10", result.VestingCommission)
 	assert.Equal(t, "300", result.GeneratedRewards)
 	assert.Equal(t, "100", result.ClaimableRewards)
 	assert.Equal(t, "50", result.ClaimableCommissions)

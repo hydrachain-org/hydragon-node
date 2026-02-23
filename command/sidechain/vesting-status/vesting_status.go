@@ -112,13 +112,12 @@ func getVestingStatus(txRelayer txrelayer.TxRelayer, validatorAddr ethgo.Address
 		return nil, fmt.Errorf("failed to query vesting position: %w", err)
 	}
 
-	duration := vestingPosition["duration"].(*big.Int)     //nolint:forcetypeassert
-	start := vestingPosition["start"].(*big.Int)           //nolint:forcetypeassert
-	end := vestingPosition["end"].(*big.Int)               //nolint:forcetypeassert
-	base := vestingPosition["base"].(*big.Int)             //nolint:forcetypeassert
-	vestBonus := vestingPosition["vestBonus"].(*big.Int)   //nolint:forcetypeassert
-	rsiBonus := vestingPosition["rsiBonus"].(*big.Int)     //nolint:forcetypeassert
-	commission := vestingPosition["commission"].(*big.Int) //nolint:forcetypeassert
+	duration := vestingPosition["duration"].(*big.Int)   //nolint:forcetypeassert
+	start := vestingPosition["start"].(*big.Int)         //nolint:forcetypeassert
+	end := vestingPosition["end"].(*big.Int)             //nolint:forcetypeassert
+	base := vestingPosition["base"].(*big.Int)           //nolint:forcetypeassert
+	vestBonus := vestingPosition["vestBonus"].(*big.Int) //nolint:forcetypeassert
+	rsiBonus := vestingPosition["rsiBonus"].(*big.Int)   //nolint:forcetypeassert
 
 	result.IsActiveVestingPosition = start.Sign() > 0
 	// Contract stores duration in seconds (durationWeeks * 1 weeks); convert back to weeks
@@ -129,7 +128,6 @@ func getVestingStatus(txRelayer txrelayer.TxRelayer, validatorAddr ethgo.Address
 	result.BaseStake = formatWei(base)
 	result.VestBonus = formatWei(vestBonus)
 	result.RSIBonus = formatWei(rsiBonus)
-	result.VestingCommission = commission.String()
 
 	// 2. Query calculatePositionTotalReward from HydraStaking
 	totalReward, err := querySingleUint256(
