@@ -142,7 +142,7 @@ func Test_GetOutput_ActivePosition(t *testing.T) {
 		VestBonus:               "500000000000000000",
 		RSIBonus:                "200000000000000000",
 		GeneratedRewards:        "300000000000000000",
-		ClaimableRewards:        "100000000000000000",
+		UnclaimedRewards:        "100000000000000000",
 		ClaimableCommissions:    "50000000000000000",
 		IsActiveVestingPosition: true,
 	}
@@ -155,7 +155,7 @@ func Test_GetOutput_ActivePosition(t *testing.T) {
 	assert.Contains(t, output, "Vesting Duration (weeks)")
 	assert.Contains(t, output, "Base Stake (wei)")
 	assert.Contains(t, output, "Generated Rewards (wei)")
-	assert.Contains(t, output, "Claimable Rewards (wei)")
+	assert.Contains(t, output, "Unclaimed Rewards (wei)")
 	assert.Contains(t, output, "Claimable Commissions (wei)")
 }
 
@@ -165,7 +165,7 @@ func Test_GetOutput_InactivePosition(t *testing.T) {
 	result := vestingStatusResult{
 		ValidatorAddress:        "0xdeadbeef",
 		GeneratedRewards:        "42000",
-		ClaimableRewards:        "100",
+		UnclaimedRewards:        "100",
 		ClaimableCommissions:    "200",
 		IsActiveVestingPosition: false,
 	}
@@ -176,7 +176,7 @@ func Test_GetOutput_InactivePosition(t *testing.T) {
 	assert.Contains(t, output, "0xdeadbeef")
 	assert.Contains(t, output, "Generated Rewards (wei)")
 	assert.Contains(t, output, "42000")
-	assert.Contains(t, output, "Claimable Rewards (wei)")
+	assert.Contains(t, output, "Unclaimed Rewards (wei)")
 	assert.Contains(t, output, "Claimable Commissions (wei)")
 
 	// Active-only fields should NOT be in inactive output
@@ -184,7 +184,7 @@ func Test_GetOutput_InactivePosition(t *testing.T) {
 	assert.NotContains(t, output, "Base Stake")
 	assert.NotContains(t, output, "Vest Bonus")
 
-	// Verify field count: should have exactly 4 fields (Validator Address, Generated Rewards, Claimable Rewards, Claimable Commissions)
+	// Verify field count: should have exactly 4 fields (Validator Address, Generated Rewards, Unclaimed Rewards, Claimable Commissions)
 	lines := strings.Split(strings.TrimSpace(output), "\n")
 	// First line is header, rest are KV pairs
 	kvLines := 0

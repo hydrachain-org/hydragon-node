@@ -151,7 +151,7 @@ func getVestingStatus(txRelayer txrelayer.TxRelayer, validatorAddr ethgo.Address
 		return nil, fmt.Errorf("failed to query unclaimed rewards: %w", err)
 	}
 
-	result.ClaimableRewards = formatWei(unclaimed)
+	result.UnclaimedRewards = formatWei(unclaimed)
 
 	// 4. Query distributedCommissions from HydraDelegation
 	// Note: distributedCommissions returns the currently claimable (pending) commissions,

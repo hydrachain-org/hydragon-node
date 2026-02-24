@@ -243,7 +243,7 @@ func Test_getVestingStatus_ActivePosition(t *testing.T) {
 	assert.Equal(t, "500", result.VestBonus)
 	assert.Equal(t, "200", result.RSIBonus)
 	assert.Equal(t, "300", result.GeneratedRewards)
-	assert.Equal(t, "100", result.ClaimableRewards)
+	assert.Equal(t, "100", result.UnclaimedRewards)
 	assert.Equal(t, "50", result.ClaimableCommissions)
 
 	relayer.AssertExpectations(t)
@@ -273,7 +273,7 @@ func Test_getVestingStatus_InactivePosition(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.False(t, result.IsActiveVestingPosition)
-	assert.Equal(t, "42", result.ClaimableRewards)
+	assert.Equal(t, "42", result.UnclaimedRewards)
 	assert.Equal(t, "7", result.ClaimableCommissions)
 
 	relayer.AssertExpectations(t)

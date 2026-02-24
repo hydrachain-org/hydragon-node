@@ -34,7 +34,7 @@ type vestingStatusResult struct {
 	VestBonus               string `json:"vestBonus"`
 	RSIBonus                string `json:"rsiBonus"`
 	GeneratedRewards        string `json:"generatedRewards"`
-	ClaimableRewards        string `json:"claimableRewards"`
+	UnclaimedRewards        string `json:"unclaimedRewards"`
 	ClaimableCommissions    string `json:"claimableCommissions"`
 	IsActiveVestingPosition bool   `json:"isActiveVestingPosition"`
 }
@@ -66,7 +66,7 @@ func (vr vestingStatusResult) GetOutput() string {
 		vals := []string{
 			fmt.Sprintf("Validator Address|%s", vr.ValidatorAddress),
 			fmt.Sprintf("Generated Rewards (wei)|%s", vr.GeneratedRewards),
-			fmt.Sprintf("Claimable Rewards (wei)|%s", vr.ClaimableRewards),
+			fmt.Sprintf("Unclaimed Rewards (wei)|%s", vr.UnclaimedRewards),
 			fmt.Sprintf("Claimable Commissions (wei)|%s", vr.ClaimableCommissions),
 		}
 
@@ -87,7 +87,7 @@ func (vr vestingStatusResult) GetOutput() string {
 		fmt.Sprintf("Vest Bonus (wei)|%s", vr.VestBonus),
 		fmt.Sprintf("RSI Bonus (wei)|%s", vr.RSIBonus),
 		fmt.Sprintf("Generated Rewards (wei)|%s", vr.GeneratedRewards),
-		fmt.Sprintf("Claimable Rewards (wei)|%s", vr.ClaimableRewards),
+		fmt.Sprintf("Unclaimed Rewards (wei)|%s", vr.UnclaimedRewards),
 		fmt.Sprintf("Claimable Commissions (wei)|%s", vr.ClaimableCommissions),
 	}
 
