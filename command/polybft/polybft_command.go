@@ -11,6 +11,7 @@ import (
 	"github.com/0xPolygon/polygon-edge/command/sidechain/commission"
 	"github.com/0xPolygon/polygon-edge/command/sidechain/rewards"
 	"github.com/0xPolygon/polygon-edge/command/sidechain/unstaking"
+	vestingstatus "github.com/0xPolygon/polygon-edge/command/sidechain/vesting-status"
 	sidechainWithdraw "github.com/0xPolygon/polygon-edge/command/sidechain/withdraw"
 	"github.com/spf13/cobra"
 )
@@ -40,6 +41,8 @@ func GetCommand() *cobra.Command {
 		terminateban.GetCommand(),
 		// sidechain (hydra delegation) command to set commission
 		commission.GetCommand(),
+		// sidechain (hydra staking) command to check vesting status
+		vestingstatus.GetCommand(),
 	)
 
 	return polybftCmd
