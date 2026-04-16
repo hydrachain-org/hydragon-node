@@ -3,12 +3,22 @@ package server
 import (
 	"fmt"
 
+	"os"
+	"path/filepath"
+
 	"github.com/0xPolygon/polygon-edge/command"
 	"github.com/0xPolygon/polygon-edge/command/helper"
 	"github.com/0xPolygon/polygon-edge/command/server/config"
 	"github.com/0xPolygon/polygon-edge/command/server/export"
 	"github.com/0xPolygon/polygon-edge/server"
 	"github.com/spf13/cobra"
+
+	leveldb2 "github.com/0xPolygon/polygon-edge/blockchain/storage/leveldb"
+	pruneCmd "github.com/0xPolygon/polygon-edge/command/prune"
+	itrie "github.com/0xPolygon/polygon-edge/state/immutable-trie"
+	hclog "github.com/hashicorp/go-hclog"
+	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/syndtr/goleveldb/leveldb/opt"
 )
 
 func GetCommand() *cobra.Command {
@@ -254,6 +264,15 @@ func setFlags(cmd *cobra.Command) {
 		"the interval (in seconds) at which special metrics are generated. a value of zero means the metrics are disabled",
 	)
 
+	cmd.Flags().BoolVar(
+		&params.shouldPrune,
+		pruneFlag,
+		false,
+		"prune historical state trie data before starting the node. "+
+			"Copies only reachable nodes from the latest state root to a new trie database, "+
+			"swaps directories, then starts normally. Original trie is kept as trie_old/",
+	)
+
 	setLegacyFlags(cmd)
 
 	setDevFlags(cmd)
@@ -327,6 +346,16 @@ func isConfigFileSpecified(cmd *cobra.Command) bool {
 func runCommand(cmd *cobra.Command, _ []string) {
 	outputter := command.InitializeOutputter(cmd)
 
+	// Pre-startup prune if --prune flag is set
+	if params.shouldPrune {
+		if err := runPreStartupPrune(outputter); err != nil {
+			outputter.SetError(fmt.Errorf("pre-startup prune failed (original trie untouched): %w", err))
+			outputter.WriteOutput()
+
+			return
+		}
+	}
+
 	config, err := params.generateConfig()
 	if err != nil {
 		outputter.SetError(err)
@@ -341,6 +370,167 @@ func runCommand(cmd *cobra.Command, _ []string) {
 
 		return
 	}
+}
+
+func runPreStartupPrune(outputter command.OutputFormatter) error {
+	dataDir := params.rawConfig.DataDir
+	triePath := filepath.Join(dataDir, "trie")
+	blockchainPath := filepath.Join(dataDir, "blockchain")
+	targetPath := filepath.Join(dataDir, "trie_new")
+	trieOldPath := filepath.Join(dataDir, "trie_old")
+
+	logger := hclog.New(&hclog.LoggerOptions{
+		Name:  "prune",
+		Level: hclog.Info,
+	})
+
+	// Crash recovery: detect interrupted swap (SIGKILL between the two renames)
+	// State: trie/ missing, trie_old/ exists → recover by renaming trie_old back
+	_, trieExists := os.Stat(triePath)
+	_, trieOldExists := os.Stat(trieOldPath)
+
+	if os.IsNotExist(trieExists) && trieOldExists == nil {
+		// trie/ gone but trie_old/ present — interrupted swap
+		logger.Warn("Detected interrupted prune swap: trie/ missing but trie_old/ exists. Recovering...")
+
+		if err := os.Rename(trieOldPath, triePath); err != nil {
+			return fmt.Errorf("CRITICAL: auto-recovery failed. Manual fix required: mv %s %s — error: %w",
+				trieOldPath, triePath, err)
+		}
+
+		logger.Info("Recovery complete: trie_old/ renamed back to trie/. Prune will restart.")
+
+		// Clean up any partial trie_new
+		os.RemoveAll(targetPath)
+	}
+
+	// Verify paths exist
+	if _, err := os.Stat(triePath); os.IsNotExist(err) {
+		return fmt.Errorf("trie directory not found at %s", triePath)
+	}
+
+	if _, err := os.Stat(blockchainPath); os.IsNotExist(err) {
+		return fmt.Errorf("blockchain directory not found at %s", blockchainPath)
+	}
+
+	// Don't prune if trie_new already exists (interrupted previous prune)
+	if _, err := os.Stat(targetPath); err == nil {
+		return fmt.Errorf("target %s already exists — previous prune may have been interrupted. "+
+			"Remove it manually before retrying", targetPath)
+	}
+
+	logger.Info("Starting pre-startup trie prune", "data-dir", dataDir)
+
+	// Resolve state root from blockchain DB
+	chainStorage, err := leveldb2.NewLevelDBStorage(blockchainPath, logger)
+	if err != nil {
+		return fmt.Errorf("failed to open blockchain storage: %w", err)
+	}
+
+	stateRoot, blockNum, err := pruneCmd.GetLatestStateRoot(chainStorage)
+	if err != nil {
+		chainStorage.Close()
+
+		return fmt.Errorf("failed to resolve state root: %w", err)
+	}
+
+	if err := chainStorage.Close(); err != nil {
+		logger.Warn("Failed to close blockchain storage cleanly", "err", err)
+	}
+
+	logger.Info("State root resolved", "block", blockNum, "root", stateRoot.String())
+
+	// Open source read-only
+	srcDB, err := leveldb.OpenFile(triePath, &opt.Options{ReadOnly: true})
+	if err != nil {
+		return fmt.Errorf("failed to open source trie: %w", err)
+	}
+
+	// Open target for writing
+	dstDB, err := leveldb.OpenFile(targetPath, nil)
+	if err != nil {
+		srcDB.Close()
+
+		return fmt.Errorf("failed to open target trie: %w", err)
+	}
+
+	// Run prune
+	result, err := itrie.PruneTrie(stateRoot, srcDB, dstDB)
+
+	srcDB.Close()
+	dstDB.Close()
+
+	if err != nil {
+		// Clean up failed target
+		os.RemoveAll(targetPath)
+
+		return fmt.Errorf("prune failed: %w", err)
+	}
+
+	logger.Info("Prune completed",
+		"source_keys", result.SourceKeys,
+		"dest_keys", result.DestKeys,
+		"duration", result.Duration.String(),
+		"validated", result.Validated,
+	)
+
+	// Swap directories: trie → trie_old, trie_new → trie
+
+	// Remove any existing trie_old from a previous prune
+	if _, err := os.Stat(trieOldPath); err == nil {
+		if err := os.RemoveAll(trieOldPath); err != nil {
+			return fmt.Errorf("failed to remove existing trie_old: %w", err)
+		}
+	}
+
+	// Preserve original ownership/permissions
+	srcInfo, err := os.Stat(triePath)
+	if err != nil {
+		return fmt.Errorf("failed to stat source trie: %w", err)
+	}
+
+	if err := os.Rename(triePath, trieOldPath); err != nil {
+		return fmt.Errorf("failed to rename trie → trie_old: %w", err)
+	}
+
+	if err := os.Rename(targetPath, triePath); err != nil {
+		// Rollback: move trie_old back to trie
+		if rbErr := os.Rename(trieOldPath, triePath); rbErr != nil {
+			logger.Error("CRITICAL: rollback failed. Data dir is in an inconsistent state. "+
+				"Manual fix required: mv trie_old trie",
+				"rename_err", err, "rollback_err", rbErr,
+				"trie_old_path", trieOldPath, "trie_path", triePath)
+
+			return fmt.Errorf("CRITICAL: rename trie_new → trie failed AND rollback failed. "+
+				"Manual fix: mv %s %s — rename error: %w, rollback error: %v",
+				trieOldPath, triePath, err, rbErr)
+		}
+
+		return fmt.Errorf("failed to rename trie_new → trie (rolled back successfully): %w", err)
+	}
+
+	// Match permissions of the new trie to the original
+	if err := os.Chmod(triePath, srcInfo.Mode()); err != nil {
+		logger.Warn("Failed to set permissions on pruned trie", "err", err)
+	}
+
+	srcSize, _ := itrie.DiskSizeBytes(trieOldPath)
+	dstSize, _ := itrie.DiskSizeBytes(triePath)
+
+	reduction := float64(0)
+	if srcSize > 0 && srcSize > dstSize {
+		reduction = float64(srcSize-dstSize) / float64(srcSize) * 100
+	}
+
+	logger.Info("Trie swap complete",
+		"old_size", fmt.Sprintf("%.1f MB", float64(srcSize)/1048576),
+		"new_size", fmt.Sprintf("%.1f MB", float64(dstSize)/1048576),
+		"reduction", fmt.Sprintf("%.1f%%", reduction),
+	)
+
+	logger.Info("Old trie preserved at trie_old/ — delete after confirming stability")
+
+	return nil
 }
 
 func runServerLoop(
