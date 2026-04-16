@@ -377,6 +377,32 @@ func runPreStartupPrune(outputter command.OutputFormatter) error {
 	triePath := filepath.Join(dataDir, "trie")
 	blockchainPath := filepath.Join(dataDir, "blockchain")
 	targetPath := filepath.Join(dataDir, "trie_new")
+	trieOldPath := filepath.Join(dataDir, "trie_old")
+
+	logger := hclog.New(&hclog.LoggerOptions{
+		Name:  "prune",
+		Level: hclog.Info,
+	})
+
+	// Crash recovery: detect interrupted swap (SIGKILL between the two renames)
+	// State: trie/ missing, trie_old/ exists → recover by renaming trie_old back
+	_, trieExists := os.Stat(triePath)
+	_, trieOldExists := os.Stat(trieOldPath)
+
+	if os.IsNotExist(trieExists) && trieOldExists == nil {
+		// trie/ gone but trie_old/ present — interrupted swap
+		logger.Warn("Detected interrupted prune swap: trie/ missing but trie_old/ exists. Recovering...")
+
+		if err := os.Rename(trieOldPath, triePath); err != nil {
+			return fmt.Errorf("CRITICAL: auto-recovery failed. Manual fix required: mv %s %s — error: %w",
+				trieOldPath, triePath, err)
+		}
+
+		logger.Info("Recovery complete: trie_old/ renamed back to trie/. Prune will restart.")
+
+		// Clean up any partial trie_new
+		os.RemoveAll(targetPath)
+	}
 
 	// Verify paths exist
 	if _, err := os.Stat(triePath); os.IsNotExist(err) {
@@ -393,11 +419,6 @@ func runPreStartupPrune(outputter command.OutputFormatter) error {
 			"Remove it manually before retrying", targetPath)
 	}
 
-	logger := hclog.New(&hclog.LoggerOptions{
-		Name:  "prune",
-		Level: hclog.Info,
-	})
-
 	logger.Info("Starting pre-startup trie prune", "data-dir", dataDir)
 
 	// Resolve state root from blockchain DB
@@ -413,7 +434,9 @@ func runPreStartupPrune(outputter command.OutputFormatter) error {
 		return fmt.Errorf("failed to resolve state root: %w", err)
 	}
 
-	chainStorage.Close()
+	if err := chainStorage.Close(); err != nil {
+		logger.Warn("Failed to close blockchain storage cleanly", "err", err)
+	}
 
 	logger.Info("State root resolved", "block", blockNum, "root", stateRoot.String())
 
@@ -452,10 +475,13 @@ func runPreStartupPrune(outputter command.OutputFormatter) error {
 	)
 
 	// Swap directories: trie → trie_old, trie_new → trie
-	trieOldPath := filepath.Join(dataDir, "trie_old")
 
 	// Remove any existing trie_old from a previous prune
-	os.RemoveAll(trieOldPath)
+	if _, err := os.Stat(trieOldPath); err == nil {
+		if err := os.RemoveAll(trieOldPath); err != nil {
+			return fmt.Errorf("failed to remove existing trie_old: %w", err)
+		}
+	}
 
 	// Preserve original ownership/permissions
 	srcInfo, err := os.Stat(triePath)
@@ -469,19 +495,30 @@ func runPreStartupPrune(outputter command.OutputFormatter) error {
 
 	if err := os.Rename(targetPath, triePath); err != nil {
 		// Rollback: move trie_old back to trie
-		os.Rename(trieOldPath, triePath)
+		if rbErr := os.Rename(trieOldPath, triePath); rbErr != nil {
+			logger.Error("CRITICAL: rollback failed. Data dir is in an inconsistent state. "+
+				"Manual fix required: mv trie_old trie",
+				"rename_err", err, "rollback_err", rbErr,
+				"trie_old_path", trieOldPath, "trie_path", triePath)
 
-		return fmt.Errorf("failed to rename trie_new → trie: %w", err)
+			return fmt.Errorf("CRITICAL: rename trie_new → trie failed AND rollback failed. "+
+				"Manual fix: mv %s %s — rename error: %w, rollback error: %v",
+				trieOldPath, triePath, err, rbErr)
+		}
+
+		return fmt.Errorf("failed to rename trie_new → trie (rolled back successfully): %w", err)
 	}
 
 	// Match permissions of the new trie to the original
-	os.Chmod(triePath, srcInfo.Mode())
+	if err := os.Chmod(triePath, srcInfo.Mode()); err != nil {
+		logger.Warn("Failed to set permissions on pruned trie", "err", err)
+	}
 
 	srcSize, _ := itrie.DiskSizeBytes(trieOldPath)
 	dstSize, _ := itrie.DiskSizeBytes(triePath)
 
 	reduction := float64(0)
-	if srcSize > 0 {
+	if srcSize > 0 && srcSize > dstSize {
 		reduction = float64(srcSize-dstSize) / float64(srcSize) * 100
 	}
 
