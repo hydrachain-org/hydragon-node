@@ -80,6 +80,35 @@ func TestPruneTrie_PropertyBased(t *testing.T) {
 	})
 }
 
+func TestFlushingBatch_FlushesAtInterval(t *testing.T) {
+	t.Parallel()
+
+	db := newMemLevelDB(t)
+	kv := NewKV(db)
+
+	fb := newFlushingBatch(kv, 10)
+
+	// Write 25 entries — should trigger 2 auto-flushes (at 10 and 20), leaving 5 pending
+	for i := 0; i < 25; i++ {
+		key := make([]byte, 32)
+		key[0] = byte(i)
+		fb.Put(key, []byte("value"))
+	}
+
+	// Before final Write, 20 entries should already be in DB (from 2 flushes)
+	count, err := KeyCount(db)
+	require.NoError(t, err)
+	assert.Equal(t, int64(20), count)
+
+	// Final Write flushes remaining 5
+	require.NoError(t, fb.Write())
+
+	count, err = KeyCount(db)
+	require.NoError(t, err)
+	assert.Equal(t, int64(25), count)
+	assert.Equal(t, int64(25), fb.total)
+}
+
 func TestPruneTrie_WithContractCode(t *testing.T) {
 	t.Parallel()
 
