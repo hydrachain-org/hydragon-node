@@ -109,6 +109,65 @@ func TestFlushingBatch_FlushesAtInterval(t *testing.T) {
 	assert.Equal(t, int64(25), fb.total)
 }
 
+func TestFlushingBatch_ExactMultiple(t *testing.T) {
+	t.Parallel()
+
+	db := newMemLevelDB(t)
+	kv := NewKV(db)
+
+	fb := newFlushingBatch(kv, 10)
+
+	for i := 0; i < 20; i++ {
+		key := make([]byte, 32)
+		key[0] = byte(i)
+		fb.Put(key, []byte("value"))
+	}
+
+	count, err := KeyCount(db)
+	require.NoError(t, err)
+	assert.Equal(t, int64(20), count)
+
+	require.NoError(t, fb.Write())
+
+	count, err = KeyCount(db)
+	require.NoError(t, err)
+	assert.Equal(t, int64(20), count)
+}
+
+func TestFlushingBatch_ErrorStopsWrites(t *testing.T) {
+	t.Parallel()
+
+	db := newMemLevelDB(t)
+	kv := NewKV(db)
+
+	fb := newFlushingBatch(kv, 5)
+
+	for i := 0; i < 5; i++ {
+		key := make([]byte, 32)
+		key[0] = byte(i)
+		fb.Put(key, []byte("value"))
+	}
+
+	require.NoError(t, fb.err, "first flush should succeed")
+
+	db.Close()
+
+	for i := 5; i < 10; i++ {
+		key := make([]byte, 32)
+		key[0] = byte(i)
+		fb.Put(key, []byte("value"))
+	}
+
+	require.Error(t, fb.err, "flush after DB close should fail")
+
+	fb.Put(make([]byte, 32), []byte("ignored"))
+	assert.Equal(t, int64(10), fb.total, "total should stop incrementing after error")
+
+	err := fb.Write()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "flush to disk failed")
+}
+
 func TestPruneTrie_WithContractCode(t *testing.T) {
 	t.Parallel()
 

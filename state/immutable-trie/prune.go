@@ -30,6 +30,7 @@ type flushingBatch struct {
 	count         int
 	total         int64
 	flushInterval int
+	err           error
 }
 
 func newFlushingBatch(storage Storage, flushInterval int) *flushingBatch {
@@ -41,19 +42,31 @@ func newFlushingBatch(storage Storage, flushInterval int) *flushingBatch {
 }
 
 func (f *flushingBatch) Put(k, v []byte) {
+	if f.err != nil {
+		return
+	}
+
 	f.batch.Put(k, v)
 	f.count++
 	f.total++
 
 	if f.count >= f.flushInterval {
-		// Flush is best-effort during traversal; final flush is checked
-		f.batch.Write() //nolint:errcheck
+		if err := f.batch.Write(); err != nil {
+			f.err = fmt.Errorf("flush to disk failed after %d entries: %w", f.total, err)
+
+			return
+		}
+
 		f.batch = f.storage.Batch()
 		f.count = 0
 	}
 }
 
 func (f *flushingBatch) Write() error {
+	if f.err != nil {
+		return f.err
+	}
+
 	if f.count > 0 {
 		return f.batch.Write()
 	}
