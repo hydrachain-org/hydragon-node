@@ -101,7 +101,7 @@ type serverParams struct {
 
 	logFileLocation string
 
-	relayer    bool
+	relayer     bool
 	shouldPrune bool
 }
 

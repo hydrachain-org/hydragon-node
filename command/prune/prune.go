@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/0xPolygon/polygon-edge/command"
 	leveldb2 "github.com/0xPolygon/polygon-edge/blockchain/storage/leveldb"
+	"github.com/0xPolygon/polygon-edge/command"
 	itrie "github.com/0xPolygon/polygon-edge/state/immutable-trie"
 	"github.com/0xPolygon/polygon-edge/types"
 	hclog "github.com/hashicorp/go-hclog"
@@ -30,7 +30,10 @@ func pruneTrieCmd() *cobra.Command {
 		Short: "Run the trie pruning operation",
 	}
 
-	cmd.Flags().StringVar(&params.DataDir, "data-dir", "", "path to node data directory (contains trie/ and blockchain/ subdirs)")
+	cmd.Flags().StringVar(
+		&params.DataDir, "data-dir", "",
+		"path to node data directory (contains trie/ and blockchain/ subdirs)",
+	)
 	cmd.Flags().StringVar(&params.TargetPath, "target-path", "", "path for the new pruned trie database")
 	cmd.Flags().Uint64Var(&params.BlockNum, "block", 0, "block number to prune at (default: latest)")
 
@@ -41,12 +44,14 @@ func pruneTrieCmd() *cobra.Command {
 
 		if err := validateParams(); err != nil {
 			outputter.SetError(err)
+
 			return
 		}
 
 		result, err := runPrune()
 		if err != nil {
 			outputter.SetError(err)
+
 			return
 		}
 
@@ -106,14 +111,17 @@ func runPrune() (*PruneTrieResult, error) {
 	defer chainStorage.Close()
 
 	// Resolve state root
-	var stateRoot types.Hash
-	var blockNum uint64
+	var (
+		stateRoot types.Hash
+		blockNum  uint64
+	)
 
 	if params.BlockNum > 0 {
 		stateRoot, err = GetStateRootAtBlock(chainStorage, params.BlockNum)
 		if err != nil {
 			return nil, err
 		}
+
 		blockNum = params.BlockNum
 	} else {
 		stateRoot, blockNum, err = GetLatestStateRoot(chainStorage)

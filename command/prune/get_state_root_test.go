@@ -73,6 +73,7 @@ func TestGetStateRootAtBlock_ReturnsCorrectRoot(t *testing.T) {
 	mock := storage.NewMockStorage()
 	mock.HookReadCanonicalHash(func(n uint64) (types.Hash, bool) {
 		h, ok := hashes[n]
+
 		return h, ok
 	})
 	mock.HookReadHeader(func(hash types.Hash) (*types.Header, error) {
