@@ -73,6 +73,8 @@ type GasHelper struct {
 	maxPrice *big.Int
 	// lastPrice is the last price returned for maxPriorityFeePerGas
 	lastPrice *big.Int
+	// defaultPrice is the initial price from config, used as fallback when no txs found
+	defaultPrice *big.Int
 	// ignorePrice is the lowest price to take into consideration
 	// when collecting transactions
 	ignorePrice *big.Int
@@ -104,6 +106,7 @@ func NewGasHelper(config *Config, backend Blockchain) (*GasHelper, error) {
 		sampleNumber:       config.SampleNumber,
 		ignorePrice:        config.IgnorePrice,
 		lastPrice:          config.LastPrice,
+		defaultPrice:       new(big.Int).Set(config.LastPrice),
 		maxPrice:           config.MaxPrice,
 		backend:            backend,
 		historyCache:       cache,
@@ -147,7 +150,8 @@ func (g *GasHelper) MaxPriorityFeePerGas() (*big.Int, error) {
 		blockMiner := types.BytesToAddress(block.Header.Miner)
 		signer := crypto.NewSigner(g.backend.Config().Forks.At(block.Number()),
 			uint64(g.backend.Config().ChainID))
-		blockTxPrices := make([]*big.Int, 0)
+
+		blockSamples := 0
 
 		for _, tx := range txSorter.txs {
 			tip := tx.EffectiveGasTip(baseFee)
@@ -163,24 +167,20 @@ func (g *GasHelper) MaxPriorityFeePerGas() (*big.Int, error) {
 			}
 
 			if sender != blockMiner {
-				blockTxPrices = append(blockTxPrices, tip)
+				allPrices = append(allPrices, tip)
+				blockSamples++
 
-				// if sample number of txs from block is reached,
-				// don't process any more txs
-				if len(blockTxPrices) >= int(g.sampleNumber) {
+				// cap samples per block to ensure diversity across blocks
+				if blockSamples >= int(g.sampleNumber) {
 					break
 				}
 			}
 		}
 
-		if len(blockTxPrices) == 0 {
-			// either block is empty or all transactions in block are sent by the miner.
-			// in this case add the latests calculated price for sampling
-			blockTxPrices = append(blockTxPrices, lastPrice)
-		}
-
-		// add the block prices to the slice of all prices
-		allPrices = append(allPrices, blockTxPrices...)
+		// Empty blocks are simply skipped — no synthetic lastPrice injection.
+		// On chains with sparse transactions (e.g. Hydra: ~700 txs/day, 0.4s blocks),
+		// injecting lastPrice into empty blocks causes a ratchet effect where the
+		// estimated gas price can only increase, never decrease.
 
 		return nil
 	}
@@ -198,16 +198,26 @@ func (g *GasHelper) MaxPriorityFeePerGas() (*big.Int, error) {
 		}
 	}
 
-	// at least amount of transactions to get
+	// If not enough transaction samples were collected from the initial window,
+	// scan further back to find more blocks with actual transactions.
 	minNumOfTx := int(g.numOfBlocksToCheck) * 2
-	// collect some more blocks and transactions if not enough transactions were collected
-	for len(allPrices) < minNumOfTx && currentBlock.Number() > 0 {
+	maxExtraBlocks := g.numOfBlocksToCheck * 5 // bounded scan to avoid traversing entire chain
+
+	for extraBlocks := uint64(0); len(allPrices) < minNumOfTx && currentBlock.Number() > 0 && extraBlocks < maxExtraBlocks; extraBlocks++ {
 		if err := collectPrices(currentBlock); err != nil {
 			return nil, err
 		}
+
+		currentBlock, found = g.backend.GetBlockByHash(currentBlock.ParentHash(), true)
+		if !found {
+			break
+		}
 	}
 
-	price := lastPrice
+	// If no real transactions were found in the scanned range, fall back to
+	// the configured initial price (default: 1 Gwei) rather than the previously
+	// cached price. This prevents the oracle from preserving a stale inflated estimate.
+	price := new(big.Int).Set(g.defaultPrice)
 
 	if len(allPrices) > 0 {
 		// sort prices from lowest to highest
