@@ -194,7 +194,18 @@ func TestGasHelper_NoPriceRatchetOnEmptyBlocks(t *testing.T) {
 	require.NoError(t, err)
 	block25.Transactions = []*types.Transaction{highTipTx}
 
-	gasHelper, err := NewGasHelper(DefaultGasHelperConfig, backend)
+	// Use a local config to avoid the pre-existing data race where other parallel
+	// tests mutate DefaultGasHelperConfig.LastPrice in-place via big.Int.Mul()
+	testConfig := &Config{
+		NumOfBlocksToCheck: 20,
+		PricePercentile:    60,
+		SampleNumber:       3,
+		MaxPrice:           ethgo.Gwei(500),
+		LastPrice:          ethgo.Gwei(1),
+		IgnorePrice:        big.NewInt(2),
+	}
+
+	gasHelper, err := NewGasHelper(testConfig, backend)
 	require.NoError(t, err)
 
 	// First call — should pick up the high tip tx
@@ -234,7 +245,8 @@ func TestGasHelper_NoPriceRatchetOnEmptyBlocks(t *testing.T) {
 	// so price2 would equal price1. With the fix, it returns the default.
 	require.True(t, price2.Cmp(price1) < 0,
 		"gas price should decrease when recent blocks are empty, got price1=%s price2=%s", price1, price2)
-	require.Equal(t, DefaultGasHelperConfig.LastPrice, price2,
+	// Compare against a fresh value, not the global which other tests mutate in-place
+	require.Equal(t, ethgo.Gwei(1), price2,
 		"gas price should return to default when no recent transactions exist")
 }
 
