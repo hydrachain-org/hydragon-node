@@ -48,6 +48,7 @@ const (
 	webSocketReadLimitFlag      = "websocket-read-limit"
 
 	metricsIntervalFlag = "metrics-interval"
+	pruneFlag           = "prune"
 )
 
 // Flags that are deprecated, but need to be preserved for
@@ -100,7 +101,8 @@ type serverParams struct {
 
 	logFileLocation string
 
-	relayer bool
+	relayer     bool
+	shouldPrune bool
 }
 
 func (p *serverParams) isMaxPeersSet() bool {
