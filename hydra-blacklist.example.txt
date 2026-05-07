@@ -1,0 +1,48 @@
+# Hydra TxPool Operator Blacklist (sample / template)
+#
+# Copy this file to /opt/hydra-blacklist.txt on your validator host (or set
+# HYDRA_TX_BLACKLIST_FILE=/path/to/file in the node's environment) to
+# activate it. The hydra binary auto-loads it on startup and re-reads it
+# every 5 seconds on mtime change — no validator restart required when
+# adding or removing addresses.
+#
+# This file is OPTIONAL. The hydra binary embeds a baseline blacklist at
+# build time (see txpool/baseline_blacklist.txt) which already covers the
+# bridge attacker wallet on every node. Entries listed here are ADDITIVE
+# on top of that baseline. Removing an address from this file does NOT
+# unblock baseline entries.
+#
+# Format: one address per line, '#' for whole-line and inline comments,
+# blank lines ignored, addresses case-insensitive. Malformed lines are
+# silently skipped. Set is bounded to 100k entries.
+#
+# Behavior: any transaction whose recovered sender appears in the
+# (baseline ∪ this file) set is refused admission to the local txpool.
+# This is a pool-only check, NOT a consensus rule — partial rollout
+# across the validator set is safe.
+#
+# To clear an entry: comment out or remove its line; the node picks up
+# the change within ~5s. Do NOT delete the entire file — that's treated
+# as a transient I/O failure and the in-memory union is preserved on
+# purpose. To clear all entries, leave the file containing only comments
+# and blanks.
+#
+# ---
+# TESTNET / EARLY-MAINNET ENTRIES — REMOVE AFTER MANUAL VERIFICATION
+# ---
+#
+# These two test wallets are listed so operators can manually verify the
+# filter is active on their node by attempting a transaction from each
+# (e.g. via MetaMask) and observing the response
+# `transaction sender is blacklisted`. The wallets hold no real value
+# and are not associated with the bridge incident.
+#
+# After mainnet manual verification is complete, a follow-up release
+# should remove these two lines. The bridge attacker (in the embedded
+# baseline) remains blocked regardless.
+
+# Test wallet 1
+0xcf4d5bf9ea8cc3cf083c9ee88305c5cce87947eb
+
+# Test wallet 2
+0x044dfa947a5b96a01d4ca6595a5e5e6ec2d11225
