@@ -3,6 +3,7 @@ package txpool
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,56 +21,103 @@ func writeBlacklist(t *testing.T, body string) string {
 	return path
 }
 
-func TestBlacklist_NoFile_Empty(t *testing.T) {
+// hackerAddr is the address embedded in the build-time baseline
+// (txpool/baseline_blacklist.txt). Tests assert it's blocked unconditionally
+// — even when no operator file exists.
+var hackerAddr = types.StringToAddress("0xd06e82e2acd26848f86d0f559f7037cd8896071b")
+
+func TestBlacklist_BaselineBlocksHackerWithNoOperatorFile(t *testing.T) {
 	t.Setenv(blacklistFileEnv, "/nonexistent/blacklist-does-not-exist.txt")
 
 	bl := newBlacklist()
-	addr := types.StringToAddress("0xd06e82e2acd26848f86d0f559f7037cd8896071b")
 
-	assert.False(t, bl.contains(addr))
+	assert.True(t, bl.contains(hackerAddr),
+		"baseline must block the hacker even with no operator file present")
 }
 
-func TestBlacklist_EmptyFile_Empty(t *testing.T) {
+func TestBlacklist_BaselineBlocksHackerWithEmptyOperatorFile(t *testing.T) {
 	path := writeBlacklist(t, "")
 	t.Setenv(blacklistFileEnv, path)
 
 	bl := newBlacklist()
-	addr := types.StringToAddress("0xd06e82e2acd26848f86d0f559f7037cd8896071b")
 
-	assert.False(t, bl.contains(addr))
+	assert.True(t, bl.contains(hackerAddr),
+		"baseline must block the hacker even when the operator file is empty")
 }
 
-func TestBlacklist_ContainsBlacklistedAddress(t *testing.T) {
+func TestBlacklist_OperatorFileIsAdditive(t *testing.T) {
+	// Operator adds a separate test wallet; baseline still blocks hacker.
+	other := types.StringToAddress("0x1111111111111111111111111111111111111111")
+	path := writeBlacklist(t, "0x1111111111111111111111111111111111111111\n")
+	t.Setenv(blacklistFileEnv, path)
+
+	bl := newBlacklist()
+
+	assert.True(t, bl.contains(hackerAddr), "baseline still active")
+	assert.True(t, bl.contains(other), "operator-file entry blocked too")
+}
+
+func TestBlacklist_OperatorRemovalDoesNotUnblockBaseline(t *testing.T) {
+	// Operator file initially has the hacker; then operator clears the file.
+	// The hacker MUST stay blocked because the baseline owns the entry.
 	path := writeBlacklist(t, "0xd06e82e2acd26848f86d0f559f7037cd8896071b\n")
 	t.Setenv(blacklistFileEnv, path)
 
 	bl := newBlacklist()
+	assert.True(t, bl.contains(hackerAddr))
 
-	hacker := types.StringToAddress("0xd06e82e2acd26848f86d0f559f7037cd8896071b")
-	other := types.StringToAddress("0x1111111111111111111111111111111111111111")
+	// Truncate operator file and force a refresh
+	time.Sleep(20 * time.Millisecond)
+	assert.NoError(t, os.WriteFile(path, []byte(""), 0600))
 
-	assert.True(t, bl.contains(hacker))
-	assert.False(t, bl.contains(other))
+	bl.mu.Lock()
+	bl.lastPoll = time.Time{}
+	bl.mu.Unlock()
+
+	assert.True(t, bl.contains(hackerAddr),
+		"removing hacker from operator file must NOT unblock the baseline entry")
 }
 
-func TestBlacklist_CaseInsensitive(t *testing.T) {
-	// Mixed-case write, all-lower lookup must match
-	path := writeBlacklist(t, "0xD06E82E2ACD26848F86D0F559F7037CD8896071B\n")
+func TestBlacklist_NoOperatorFile_BaselineStillActive(t *testing.T) {
+	t.Setenv(blacklistFileEnv, "/nonexistent/blacklist-does-not-exist.txt")
+
+	bl := newBlacklist()
+
+	other := types.StringToAddress("0x2222222222222222222222222222222222222222")
+	assert.True(t, bl.contains(hackerAddr), "baseline blocks hacker")
+	assert.False(t, bl.contains(other), "non-baseline non-file address is not blocked")
+}
+
+func TestBlacklist_ContainsBlacklistedAddress(t *testing.T) {
+	other := types.StringToAddress("0x1234567890abcdef1234567890abcdef12345678")
+	path := writeBlacklist(t, "0x1234567890abcdef1234567890abcdef12345678\n")
 	t.Setenv(blacklistFileEnv, path)
 
 	bl := newBlacklist()
 
-	addr := types.StringToAddress("0xd06e82e2acd26848f86d0f559f7037cd8896071b")
+	assert.True(t, bl.contains(other))
+	other2 := types.StringToAddress("0x9999999999999999999999999999999999999999")
+	assert.False(t, bl.contains(other2))
+}
+
+func TestBlacklist_CaseInsensitive(t *testing.T) {
+	// Mixed-case write, all-lower lookup must match
+	path := writeBlacklist(t, "0xABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFABCD\n")
+	t.Setenv(blacklistFileEnv, path)
+
+	bl := newBlacklist()
+
+	addr := types.StringToAddress("0xabcdefabcdefabcdefabcdefabcdefabcdefabcd")
 	assert.True(t, bl.contains(addr))
 }
 
 func TestBlacklist_TolerantToCommentsAndWhitespace(t *testing.T) {
 	body := `# leading comment
-   0xd06e82e2acd26848f86d0f559f7037cd8896071b   # inline comment
+   0x1111111111111111111111111111111111111111   # inline comment
 
 # blank line above
 
-  0x1111111111111111111111111111111111111111
+  0x2222222222222222222222222222222222222222
 not-an-address
 0xtoo-short
 `
@@ -78,11 +126,11 @@ not-an-address
 
 	bl := newBlacklist()
 
-	hacker := types.StringToAddress("0xd06e82e2acd26848f86d0f559f7037cd8896071b")
-	second := types.StringToAddress("0x1111111111111111111111111111111111111111")
-	other := types.StringToAddress("0x2222222222222222222222222222222222222222")
+	first := types.StringToAddress("0x1111111111111111111111111111111111111111")
+	second := types.StringToAddress("0x2222222222222222222222222222222222222222")
+	other := types.StringToAddress("0x3333333333333333333333333333333333333333")
 
-	assert.True(t, bl.contains(hacker))
+	assert.True(t, bl.contains(first))
 	assert.True(t, bl.contains(second))
 	assert.False(t, bl.contains(other))
 }
@@ -90,24 +138,22 @@ not-an-address
 // TestBlacklist_ReloadsOnFileChange exercises the lazy mtime-based reload.
 // We bypass the 5-second poll throttle by resetting lastPoll between checks.
 func TestBlacklist_ReloadsOnFileChange(t *testing.T) {
+	addr := types.StringToAddress("0x1111111111111111111111111111111111111111")
 	path := writeBlacklist(t, "")
 	t.Setenv(blacklistFileEnv, path)
 
 	bl := newBlacklist()
-	addr := types.StringToAddress("0xd06e82e2acd26848f86d0f559f7037cd8896071b")
 
 	assert.False(t, bl.contains(addr), "should not be blacklisted before file is populated")
 
-	// Sleep enough for mtime resolution then write the new content.
 	time.Sleep(20 * time.Millisecond)
-	assert.NoError(t, os.WriteFile(path, []byte("0xd06e82e2acd26848f86d0f559f7037cd8896071b\n"), 0600))
+	assert.NoError(t, os.WriteFile(path, []byte("0x1111111111111111111111111111111111111111\n"), 0600))
 
-	// Force a poll on next call
 	bl.mu.Lock()
 	bl.lastPoll = time.Time{}
 	bl.mu.Unlock()
 
-	assert.True(t, bl.contains(addr), "should pick up newly-added address")
+	assert.True(t, bl.contains(addr), "should pick up newly-added address from operator file")
 
 	// Now remove the address by truncating the file
 	time.Sleep(20 * time.Millisecond)
@@ -118,20 +164,22 @@ func TestBlacklist_ReloadsOnFileChange(t *testing.T) {
 	bl.mu.Unlock()
 
 	assert.False(t, bl.contains(addr), "should drop entry after file is emptied")
+	assert.True(t, bl.contains(hackerAddr), "baseline unaffected")
 }
 
 func TestBlacklist_StatErrorPreservesSet(t *testing.T) {
 	// Load a populated file, then make it disappear, then prove the
-	// in-memory set is preserved (NOT cleared) on the next refresh.
+	// in-memory set (file portion) is preserved on the next refresh.
+	addr := types.StringToAddress("0x1111111111111111111111111111111111111111")
 	dir := t.TempDir()
 	path := filepath.Join(dir, "blacklist.txt")
-	assert.NoError(t, os.WriteFile(path, []byte("0xd06e82e2acd26848f86d0f559f7037cd8896071b\n"), 0600))
+	assert.NoError(t, os.WriteFile(path, []byte("0x1111111111111111111111111111111111111111\n"), 0600))
 
 	t.Setenv(blacklistFileEnv, path)
 	bl := newBlacklist()
 
-	hacker := types.StringToAddress("0xd06e82e2acd26848f86d0f559f7037cd8896071b")
-	assert.True(t, bl.contains(hacker), "should be loaded after constructor")
+	assert.True(t, bl.contains(addr), "operator-file entry loaded after constructor")
+	assert.True(t, bl.contains(hackerAddr), "baseline always loaded")
 
 	// Remove the file — simulates transient I/O failure.
 	assert.NoError(t, os.Remove(path))
@@ -141,9 +189,11 @@ func TestBlacklist_StatErrorPreservesSet(t *testing.T) {
 	bl.lastPoll = time.Time{}
 	bl.mu.Unlock()
 
-	// MUST still be blacklisted — stat error must not clear the set.
-	assert.True(t, bl.contains(hacker),
-		"transient stat error must NOT clear the in-memory blacklist; this guards against I/O blips opening admission windows")
+	// MUST still be blacklisted — stat error must not clear the union.
+	assert.True(t, bl.contains(addr),
+		"transient stat error must NOT clear the in-memory blacklist union")
+	assert.True(t, bl.contains(hackerAddr),
+		"baseline always remains active regardless of file state")
 }
 
 func TestBlacklist_RejectsMalformedHex(t *testing.T) {
@@ -151,35 +201,40 @@ func TestBlacklist_RejectsMalformedHex(t *testing.T) {
 	// pollute the set with types.ZeroAddress.
 	body := `0xZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ
 0x0000000000000000000000000000000000000000
-0xd06e82e2acd26848f86d0f559f7037cd8896071b
+0x1111111111111111111111111111111111111111
 `
 	path := writeBlacklist(t, body)
 	t.Setenv(blacklistFileEnv, path)
 
 	bl := newBlacklist()
 
-	// Real entry survives.
-	assert.True(t, bl.contains(types.StringToAddress("0xd06e82e2acd26848f86d0f559f7037cd8896071b")))
-
-	// ZeroAddress must NOT be in the set, even though the file contained it.
+	first := types.StringToAddress("0x1111111111111111111111111111111111111111")
+	assert.True(t, bl.contains(first))
 	assert.False(t, bl.contains(types.ZeroAddress),
-		"ZeroAddress must never be blacklisted; signer recovery never returns it on valid signatures, so the only way it ends up in the set is malformed-hex pollution")
+		"ZeroAddress must never be blacklisted; signer recovery never returns it on valid signatures")
 }
 
 func TestBlacklist_PollThrottling(t *testing.T) {
+	addr := types.StringToAddress("0x1111111111111111111111111111111111111111")
 	path := writeBlacklist(t, "")
 	t.Setenv(blacklistFileEnv, path)
 
 	bl := newBlacklist()
-	addr := types.StringToAddress("0xd06e82e2acd26848f86d0f559f7037cd8896071b")
 
 	assert.False(t, bl.contains(addr))
 
 	// Write new content but DO NOT clear lastPoll. Throttling should mean
 	// the change is not picked up on the very next call.
 	time.Sleep(20 * time.Millisecond)
-	assert.NoError(t, os.WriteFile(path, []byte("0xd06e82e2acd26848f86d0f559f7037cd8896071b\n"), 0600))
+	assert.NoError(t, os.WriteFile(path, []byte("0x1111111111111111111111111111111111111111\n"), 0600))
 
-	// First call after lastPoll set during constructor — within throttle window.
 	assert.False(t, bl.contains(addr), "throttle should suppress immediate reload")
+}
+
+func TestBlacklist_BaselineFileIsParseable(t *testing.T) {
+	// Sanity: the build-embedded baseline file must parse to a non-empty set.
+	// If somebody breaks the format of baseline_blacklist.txt, this fails loud.
+	set := parseBlacklist(strings.NewReader(baselineBlacklistRaw))
+	assert.NotEmpty(t, set, "embedded baseline must contain at least one address")
+	assert.Contains(t, set, hackerAddr, "embedded baseline must include the bridge attacker")
 }

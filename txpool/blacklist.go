@@ -2,7 +2,9 @@ package txpool
 
 import (
 	"bufio"
+	_ "embed"
 	"errors"
+	"io"
 	"os"
 	"strings"
 	"sync"
@@ -13,33 +15,50 @@ import (
 )
 
 // ErrTxBlacklisted is returned by validateTx when the transaction sender
-// matches an address in the local blacklist file. This is a pool-only check:
+// matches an address in the local blacklist. This is a pool-only check:
 // the transaction is refused admission to the local txpool, but the rule is
 // not part of consensus — blocks from other validators that contain such
 // transactions remain valid. Partial rollout across the validator set is
 // therefore safe (no chain split / halt risk).
 var ErrTxBlacklisted = errors.New("transaction sender is blacklisted")
 
-// blacklistFileEnv lets operators override the default blacklist path.
+// baselineBlacklistRaw is the build-time embedded baseline. Entries here
+// apply on every node regardless of operator configuration. The operator
+// file (if present) is additive — it can only ADD addresses, never remove
+// baseline entries.
+//
+//go:embed baseline_blacklist.txt
+var baselineBlacklistRaw string
+
 const (
+	// blacklistFileEnv lets operators override the default operator-file path.
 	blacklistFileEnv     = "HYDRA_TX_BLACKLIST_FILE"
 	defaultBlacklistFile = "/opt/hydra-blacklist.txt"
 	blacklistReloadEvery = 5 * time.Second
 	// maxBlacklistEntries bounds memory use against a malformed or
-	// hostile-write blacklist file. Practical operator lists are tiny
-	// (single-digit entries); anything beyond this is a bug or attack.
+	// hostile-write blacklist file. Practical operator lists are tiny;
+	// anything beyond this is a bug or attack.
 	maxBlacklistEntries = 100_000
 )
 
 type addressSet map[types.Address]struct{}
 
-// blacklist maintains the set of senders whose transactions this node refuses
-// to admit to its local pool. Reads use atomic.Value for lock-free hot-path
-// access. The file is re-read at most every blacklistReloadEvery; updates are
-// only applied if the mtime has changed.
+// blacklist maintains the runtime set of senders whose transactions this
+// node refuses to admit to its local pool. The runtime set is the union of
+// the build-embedded baseline and the operator-controlled file (if any).
+//
+// Reads use atomic.Value for lock-free hot-path access. The operator file
+// is re-read at most every blacklistReloadEvery; updates are only applied
+// if the mtime has changed.
 type blacklist struct {
 	path string
 
+	// baseline is the immutable build-time set; never mutated after
+	// construction. Always present in the runtime union.
+	baseline addressSet
+
+	// loaded is the runtime union (baseline ∪ operator-file) loaded under
+	// atomic.Value for lock-free reads.
 	loaded atomic.Value // addressSet
 
 	mu       sync.Mutex
@@ -53,15 +72,21 @@ func newBlacklist() *blacklist {
 		path = defaultBlacklistFile
 	}
 
-	bl := &blacklist{path: path}
-	bl.loaded.Store(addressSet{})
+	bl := &blacklist{
+		path:     path,
+		baseline: parseBlacklist(strings.NewReader(baselineBlacklistRaw)),
+	}
+
+	// Start with baseline-only; refresh() adds operator-file entries on top.
+	bl.loaded.Store(copyAddressSet(bl.baseline))
 	bl.refresh()
 
 	return bl
 }
 
-// contains reports whether addr is currently blacklisted. It triggers a lazy
-// refresh of the underlying file at most once per blacklistReloadEvery.
+// contains reports whether addr is currently blacklisted (baseline ∪ file).
+// It triggers a lazy refresh of the operator file at most once per
+// blacklistReloadEvery.
 func (b *blacklist) contains(addr types.Address) bool {
 	b.maybeRefresh()
 
@@ -94,7 +119,9 @@ func (b *blacklist) refresh() {
 		// silently clear the filter — that would open a window in which a
 		// blacklisted sender's tx could be admitted. Operators must clear
 		// entries by truncating or removing addresses from the file
-		// in-place; only a successful read with zero entries clears the set.
+		// in-place; only a successful read with zero entries clears the
+		// operator portion of the union. The baseline is unaffected by
+		// stat failures and remains active.
 		return
 	}
 
@@ -107,25 +134,30 @@ func (b *blacklist) refresh() {
 	b.mtime = info.ModTime()
 	b.mu.Unlock()
 
-	set := loadBlacklistFile(b.path)
-	b.loaded.Store(set)
+	fileSet := loadBlacklistFile(b.path)
+	b.loaded.Store(unionAddressSets(b.baseline, fileSet))
 }
 
-// loadBlacklistFile parses the blacklist. One address per line, lines starting
-// with '#' are comments, blanks ignored, addresses case-insensitive.
-// Malformed lines are skipped (not fatal — operator-controlled file).
-// Entries are bounded by maxBlacklistEntries to prevent OOM on a malformed
-// or hostile-write file.
+// loadBlacklistFile parses the operator-controlled blacklist file. Same
+// format as the embedded baseline: one address per line, '#' comments,
+// blanks ignored, addresses case-insensitive. Bounded by
+// maxBlacklistEntries to prevent OOM on a malformed or hostile-write file.
 func loadBlacklistFile(path string) addressSet {
-	set := addressSet{}
-
 	f, err := os.Open(path)
 	if err != nil {
-		return set
+		return addressSet{}
 	}
 	defer f.Close()
 
-	scanner := bufio.NewScanner(f)
+	return parseBlacklist(f)
+}
+
+// parseBlacklist parses blacklist syntax from any io.Reader, used by both
+// the embedded baseline and the operator file path.
+func parseBlacklist(r io.Reader) addressSet {
+	set := addressSet{}
+
+	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
 		if len(set) >= maxBlacklistEntries {
 			break
@@ -160,9 +192,30 @@ func loadBlacklistFile(path string) addressSet {
 
 		set[addr] = struct{}{}
 	}
-	// Note: scanner.Err() is intentionally ignored here. A malformed file
-	// (e.g. line >64 KiB exceeding bufio default) yields a partial set; we
-	// prefer "best-effort filter" to "no filter" given the safety claim.
+	// Note: scanner.Err() is intentionally ignored. A malformed file (e.g.
+	// line >64 KiB exceeding bufio default) yields a partial set; we prefer
+	// "best-effort filter" to "no filter" given the safety invariant.
 
 	return set
+}
+
+func copyAddressSet(s addressSet) addressSet {
+	out := make(addressSet, len(s))
+	for k := range s {
+		out[k] = struct{}{}
+	}
+
+	return out
+}
+
+func unionAddressSets(a, b addressSet) addressSet {
+	out := make(addressSet, len(a)+len(b))
+	for k := range a {
+		out[k] = struct{}{}
+	}
+	for k := range b {
+		out[k] = struct{}{}
+	}
+
+	return out
 }

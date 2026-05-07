@@ -1,0 +1,34 @@
+# Hydra TxPool Operator Blacklist (sample)
+#
+# This file is OPTIONAL. The hydra binary embeds a baseline blacklist at
+# build time (see txpool/baseline_blacklist.txt) which already covers the
+# bridge attacker wallet on every node. This file lets operators ADD
+# additional addresses on a per-deployment basis. It cannot remove
+# baseline entries.
+#
+# To activate: copy this file to /opt/hydra-blacklist.txt on the validator
+# host, or set HYDRA_TX_BLACKLIST_FILE=/path/to/this/file in the node's
+# environment. The file is reloaded every 5s on mtime change — no restart
+# required when adding or removing addresses.
+#
+# Format: one address per line, '#' for whole-line and inline comments,
+# blank lines ignored, addresses case-insensitive. Malformed lines are
+# silently skipped. Set is bounded to 100k entries.
+#
+# ---
+# TESTNET-ONLY ENTRY — REMOVE BEFORE PROMOTING TO PROD
+# ---
+#
+# MetaMask test wallet used for manual e2e verification of the txpool
+# filter on the testnet validator (Hydra-Validator-Testnet-1, 89.58.41.86).
+# Deploy with:
+#
+#     scp this file to validator:/opt/hydra-blacklist.txt
+#
+# Then attempt a transaction from this wallet via the testnet RPC and
+# confirm it returns "transaction sender is blacklisted".
+#
+# This entry MUST be removed from this file before the release PR
+# (testnet -> prod) is opened. The release PR's pre-merge checklist
+# enforces it.
+0xcf4d5bf9ea8cc3cf083c9ee88305c5cce87947eb
