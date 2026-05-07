@@ -196,6 +196,10 @@ type TxPool struct {
 
 	// chain id
 	chainID *big.Int
+
+	// senders refused admission to the local pool. Pool-only filter; not
+	// part of consensus. See blacklist.go.
+	blacklist *blacklist
 }
 
 // NewTxPool returns a new pool for processing incoming transactions.
@@ -222,6 +226,8 @@ func NewTxPool(
 		promoteReqCh: make(chan promoteRequest),
 		pruneCh:      make(chan struct{}),
 		shutdownCh:   make(chan struct{}),
+
+		blacklist: newBlacklist(),
 	}
 
 	// Attach the event manager
@@ -597,6 +603,16 @@ func (p *TxPool) validateTx(tx *types.Transaction) error {
 	// If no address was set, update it
 	if tx.From == types.ZeroAddress {
 		tx.From = from
+	}
+
+	// Pool-only blacklist check (no consensus impact). Refusing here keeps
+	// the tx out of this node's local pool and prevents this node from
+	// gossiping or sealing it. Blocks from other validators that include
+	// such transactions are still considered valid by this node.
+	if p.blacklist != nil && p.blacklist.contains(from) {
+		metrics.IncrCounter([]string{txPoolMetrics, "blacklisted_sender_txs"}, 1)
+
+		return ErrTxBlacklisted
 	}
 
 	// Grab current block number

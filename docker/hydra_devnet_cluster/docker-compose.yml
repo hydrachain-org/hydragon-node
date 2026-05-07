@@ -10,6 +10,7 @@ services:
       - COINGECKO_API_KEY=${COINGECKO_API_KEY}
     volumes:
       - data:/data
+      - ./hydra.sh:/app/hydra.sh:ro
     networks:
       - hydra-docker
 
