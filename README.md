@@ -155,6 +155,43 @@ hydra server --data-dir ./node-secrets --chain mainnet --grpc-address :9632 --li
 
 This process may take some time, as the node needs to fully sync with the blockchain. Once the syncing process is complete, you can proceed with the next steps.
 
+### TxPool Sender Blacklist (optional operator file)
+
+The hydra binary refuses admission to transactions whose recovered sender appears in a runtime blacklist. The check is **pool-only** — it does not change consensus, so partial rollout across the validator set is safe. Blocks from peers that contain such transactions are still considered valid.
+
+The blacklist is the **union** of two layers:
+
+1. **Embedded baseline** — compiled into every binary at build time (see `txpool/baseline_blacklist.txt`). This currently contains the bridge attacker wallet from the May 2026 incident, so every node enforces it automatically with no operator action required.
+2. **Optional operator file** — an additional list maintained by each validator operator on their host. Entries here are **additive**: they extend the baseline but cannot remove baseline entries.
+
+#### Using the operator file
+
+Copy the sample template from the repo to the default path, then edit as needed:
+
+```
+cp hydra-blacklist.example.txt /opt/hydra-blacklist.txt
+```
+
+Or set a custom path via the environment:
+
+```
+HYDRA_TX_BLACKLIST_FILE=/path/to/your/blacklist.txt
+```
+
+The file is automatically re-read every 5 seconds when its mtime changes — no validator restart is needed when adding or removing addresses.
+
+**Format:** one address per line; `#` starts a whole-line or inline comment; blank lines and malformed lines are ignored; addresses are case-insensitive; the in-memory set is bounded to 100,000 entries to guard against accidentally pointing the loader at a huge file.
+
+```
+# Whole-line comment
+0xd06e82e2acd26848f86d0f559f7037cd8896071b   # inline comment
+0xanother_address_here_lowercase_or_mixed_case
+```
+
+**Clearing entries:** comment out or delete the line. **Do NOT delete the entire file** — a missing file is treated as a transient I/O failure and the in-memory union is preserved on purpose. To clear all operator entries, leave the file containing only comments and blanks.
+
+A rejected transaction returns the JSON-RPC error `transaction sender is blacklisted` and increments the metric `txpool/blacklisted_sender_txs` for observability.
+
 ### Prepare account to be a validator
 
 After your node is operational and fully synced, you're ready to become a validator. This requires:
