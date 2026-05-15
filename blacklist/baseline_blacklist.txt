@@ -1,0 +1,33 @@
+# Hydra Baseline Blacklist (embedded at build time)
+#
+# !!! WARNING: ALSO A CONSENSUS PARAMETER ONCE THE senderBlacklist FORK !!!
+# !!! IS ACTIVE. EDITING THIS FILE CHANGES STATE-TRANSITION BEHAVIOUR.  !!!
+# !!! Any change requires a coordinated binary release across all       !!!
+# !!! validators BEFORE the activation block.  Mismatched baselines     !!!
+# !!! after activation can split the chain.                             !!!
+#
+# Two enforcement layers consume this file:
+#   1. TxPool admission filter (pool blacklist) — NOT fork-gated. Senders
+#      here are refused admission to the local txpool on every Hydra node,
+#      regardless of whether the operator-controlled file at
+#      /opt/hydra-blacklist.txt (or HYDRA_TX_BLACKLIST_FILE) exists.
+#   2. Consensus rule (state/executor.go check #5) — fork-gated on
+#      `senderBlacklist`. Once active, a block containing any tx whose
+#      sender is in this baseline is INVALID. The consensus rule reads
+#      ONLY this embedded baseline, never the operator file.
+#
+# The operator file is ADDITIVE: it can only ADD addresses to the runtime
+# blacklist. Removing an address from the operator file does NOT unblock
+# entries from this baseline. Updating the baseline requires a new binary
+# build + release.
+#
+# Format: one address per line, '#' starts a line- or inline comment.
+#
+# ---
+#
+# Bridge attacker wallet — incident 2026-05-03. The attacker compromised
+# the bridge admin role on Hydragon, fabricated inbound bridge proposals,
+# minted ~9e14 wrapped tokens to this address, then drained ~$300K of
+# real-asset vaults on Ethereum. This wallet still holds the wrapped
+# tokens on Hydragon and any movement must be denied at every validator.
+0xd06e82e2acd26848f86d0f559f7037cd8896071b
