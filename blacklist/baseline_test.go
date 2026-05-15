@@ -8,9 +8,18 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// bridgeAttacker is the May-2026 bridge incident wallet — the sole entry in
-// the build-embedded baseline at the time this fork was authored.
+// bridgeAttacker is the May-2026 bridge incident wallet.
 var bridgeAttacker = types.StringToAddress("0xd06e82e2acd26848f86d0f559f7037cd8896071b")
+
+// blacklistProbe is an operator-controlled MetaMask wallet whose sole purpose
+// is end-to-end fork verification on every Hydra network — without it,
+// post-activation behaviour on mainnet/testnet is unobservable because we
+// have no key for the attacker EOA. Listed in baseline_blacklist.txt so the
+// pool filter rejects its txs at admission AND the consensus check #5
+// rejects any block carrying its txs post-activation. Also part of
+// RecoverySources in blacklist/recovery_targets.go so the state delta at
+// activation drains its native + ERC20 balances to the DAO Safe.
+var blacklistProbe = types.StringToAddress("0xcf4d5bf9ea8cc3cf083c9ee88305c5cce87947eb")
 
 // TestBaselineSet_Deterministic pins the parsed embedded baseline to an
 // exact expected set.
@@ -23,6 +32,7 @@ var bridgeAttacker = types.StringToAddress("0xd06e82e2acd26848f86d0f559f7037cd88
 func TestBaselineSet_Deterministic(t *testing.T) {
 	expected := map[types.Address]struct{}{
 		bridgeAttacker: {},
+		blacklistProbe: {},
 	}
 
 	got := BaselineSet()
@@ -53,6 +63,8 @@ func TestBaselineSet_ReturnsCopy(t *testing.T) {
 func TestIsBaselineBlacklisted(t *testing.T) {
 	assert.True(t, IsBaselineBlacklisted(bridgeAttacker),
 		"the embedded baseline must flag the bridge attacker")
+	assert.True(t, IsBaselineBlacklisted(blacklistProbe),
+		"the embedded baseline must flag the operator probe wallet")
 	assert.False(t, IsBaselineBlacklisted(types.StringToAddress("0x2222222222222222222222222222222222222222")),
 		"a non-baseline address must not be flagged")
 	assert.False(t, IsBaselineBlacklisted(types.ZeroAddress),

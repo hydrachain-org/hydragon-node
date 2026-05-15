@@ -95,6 +95,11 @@ func (b *BlockBuilder) Reset() error {
 		return err
 	}
 
+	// senderBlacklist fork: one-shot state recovery applied BEFORE any user txs
+	// in the activation block, so the proposer's stateRoot reflects the delta
+	// and matches the verifier-side computation. No-op on every other block.
+	state.ApplyOneShotRecovery(transition, b.header.Number)
+
 	b.state = transition
 	b.block = nil
 	b.txns = []*types.Transaction{}

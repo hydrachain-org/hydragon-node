@@ -143,6 +143,16 @@ func (e *Executor) ProcessBlock(
 		return nil, err
 	}
 
+	// One-shot senderBlacklist fork recovery. Fires exactly when the current
+	// block is the configured senderBlacklist activation block. Mutates state
+	// BEFORE any user transactions in the block apply — so the recovery is
+	// part of the block's state root and validated by every patched verifier.
+	// Idempotent on re-execution (already-zero source = no-op).
+	// Note: this is the LEGACY/generic block-import path. polybft consumers
+	// (block_builder.go + blockchain_wrapper.go) use BeginTxn directly and
+	// call ApplyOneShotRecovery themselves — see those call sites.
+	ApplyOneShotRecovery(txn, block.Header.Number)
+
 	for _, t := range block.Transactions {
 		if t.Gas > block.Header.GasLimit {
 			continue
