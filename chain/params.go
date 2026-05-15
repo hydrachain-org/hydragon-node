@@ -92,6 +92,12 @@ const (
 	TxHashWithType      = "txHashWithType"
 	LondonFix           = "londonfix"
 	PriceOracleFix      = "priceOracleFix"
+	// SenderBlacklist, once active, makes the build-embedded sender baseline
+	// blacklist a consensus rule: a block containing a transaction from a
+	// blacklisted sender is invalid and rejected during block verification.
+	// Pure-flag fork (no forkmanager handler) — consulted only as
+	// ForksInTime.SenderBlacklist in state.checkAndProcessTx.
+	SenderBlacklist = "senderBlacklist"
 )
 
 // Forks is map which contains all forks and their starting blocks from genesis
@@ -131,6 +137,7 @@ func (f *Forks) At(block uint64) ForksInTime {
 		TxHashWithType:      f.IsActive(TxHashWithType, block),
 		LondonFix:           f.IsActive(LondonFix, block),
 		PriceOracleFix:      f.IsActive(PriceOracleFix, block),
+		SenderBlacklist:     f.IsActive(SenderBlacklist, block),
 	}
 }
 
@@ -184,7 +191,8 @@ type ForksInTime struct {
 	QuorumCalcAlignment,
 	TxHashWithType,
 	LondonFix,
-	PriceOracleFix bool
+	PriceOracleFix,
+	SenderBlacklist bool
 }
 
 // AllForksEnabled should contain all supported forks by current edge version
@@ -202,4 +210,5 @@ var AllForksEnabled = &Forks{
 	TxHashWithType:      NewFork(0),
 	LondonFix:           NewFork(0),
 	PriceOracleFix:      NewFork(0),
+	SenderBlacklist:     NewFork(0),
 }

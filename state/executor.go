@@ -9,6 +9,7 @@ import (
 	"github.com/hashicorp/go-hclog"
 	"github.com/umbracle/ethgo/abi"
 
+	"github.com/0xPolygon/polygon-edge/blacklist"
 	"github.com/0xPolygon/polygon-edge/chain"
 	"github.com/0xPolygon/polygon-edge/contracts"
 	"github.com/0xPolygon/polygon-edge/crypto"
@@ -519,6 +520,15 @@ var (
 
 	// ErrNonceUintOverflow is returned if uint64 overflow happens
 	ErrNonceUintOverflow = errors.New("nonce uint64 overflow")
+
+	// ErrConsensusBlacklistedSender is returned by checkAndProcessTx once the
+	// senderBlacklist fork is active and a transaction's sender is in the
+	// build-embedded baseline blacklist. Surfacing it rejects the transaction
+	// and, because ProcessBlock returns on the first Write error, invalidates
+	// the entire block — a block containing such a transaction will not be
+	// accepted by any patched node. Distinct from txpool.ErrTxBlacklisted,
+	// which is the pool-admission-only check.
+	ErrConsensusBlacklistedSender = errors.New("transaction sender is blacklisted (consensus rule)")
 )
 
 type TransitionApplicationError struct {
@@ -1187,6 +1197,36 @@ func checkAndProcessTx(msg *types.Transaction, t *Transition) error {
 				contracts.SystemCaller,
 				msg.From,
 			),
+			true,
+		)
+	}
+
+	// 5. caller must not be a consensus-blacklisted sender.
+	//
+	// Gated on the senderBlacklist fork: before activation t.config.SenderBlacklist
+	// is false and this is a strict no-op (backward-compatible — a genesis with
+	// no senderBlacklist entry yields IsActive==false). After activation,
+	// surfacing this error rejects the transaction; because ProcessBlock returns
+	// on the first Write error, a block containing a blacklisted-sender tx is
+	// invalid and rejected by every patched node.
+	//
+	// This check lives ONLY in checkAndProcessTx (user transactions) and is
+	// deliberately NOT mirrored into checkAndProcessStateTx — consensus state
+	// transactions originate from the system caller and must never be subject
+	// to the blacklist.
+	//
+	// The consensus rule consults ONLY the build-embedded baseline, which is
+	// byte-identical and deterministic across every node running the same
+	// binary. The hot-editable operator file (txpool poolBlacklist) is host-
+	// specific and is never reached from here — using it would split the chain.
+	if t.config.SenderBlacklist && blacklist.IsBaselineBlacklisted(msg.From) {
+		t.logger.Warn(
+			"rejected transaction from consensus-blacklisted sender",
+			"from", msg.From,
+		)
+
+		return NewTransitionApplicationError(
+			fmt.Errorf("%w: %v", ErrConsensusBlacklistedSender, msg.From),
 			true,
 		)
 	}
