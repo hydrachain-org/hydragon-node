@@ -1,6 +1,7 @@
 package state
 
 import (
+	"errors"
 	"math/big"
 	"testing"
 
@@ -56,8 +57,9 @@ func TestCheckAndProcessTx_SenderBlacklist(t *testing.T) {
 		err := checkAndProcessTx(blacklistTestTx(bridgeAttacker), newBlacklistTestTransition(true))
 		require.Error(t, err, "post-activation a tx from the baseline-blacklisted sender must be rejected")
 
-		appErr, ok := err.(*TransitionApplicationError)
-		require.True(t, ok, "must surface as *TransitionApplicationError so ProcessBlock fails the whole block")
+		var appErr *TransitionApplicationError
+		require.True(t, errors.As(err, &appErr),
+			"must surface as *TransitionApplicationError so ProcessBlock fails the whole block")
 		assert.ErrorIs(t, appErr.Err, ErrConsensusBlacklistedSender)
 		assert.True(t, appErr.IsRecoverable,
 			"check #5 is recoverable=true, consistent with checks #1-4: a proposer skips the tx, "+
@@ -91,8 +93,8 @@ func TestCheckAndProcessTx_SenderBlacklist(t *testing.T) {
 		err := checkAndProcessTx(blacklistTestTx(mixedCase), newBlacklistTestTransition(true))
 		require.Error(t, err)
 
-		appErr, ok := err.(*TransitionApplicationError)
-		require.True(t, ok)
+		var appErr *TransitionApplicationError
+		require.True(t, errors.As(err, &appErr))
 		assert.ErrorIs(t, appErr.Err, ErrConsensusBlacklistedSender)
 	})
 
@@ -106,8 +108,8 @@ func TestCheckAndProcessTx_SenderBlacklist(t *testing.T) {
 		err := checkAndProcessTx(blacklistTestTx(contracts.SystemCaller), newBlacklistTestTransition(true))
 		require.Error(t, err)
 
-		appErr, ok := err.(*TransitionApplicationError)
-		require.True(t, ok)
+		var appErr *TransitionApplicationError
+		require.True(t, errors.As(err, &appErr))
 		assert.NotErrorIs(t, appErr.Err, ErrConsensusBlacklistedSender,
 			"the system caller must be caught by check #4 (SystemCaller), not the blacklist check")
 	})
