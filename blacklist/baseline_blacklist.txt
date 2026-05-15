@@ -31,3 +31,17 @@
 # real-asset vaults on Ethereum. This wallet still holds the wrapped
 # tokens on Hydragon and any movement must be denied at every validator.
 0xd06e82e2acd26848f86d0f559f7037cd8896071b
+#
+# Blacklist verification probe wallet — operator-controlled MetaMask address
+# whose ONLY purpose is to verify on every network (mainnet, testnet, devnet)
+# that the senderBlacklist consensus rule is wired and firing on a deployed
+# binary. Pre-activation: a tx from this address is rejected by the pool
+# filter at admission with `-32600: transaction sender is blacklisted`
+# (defense layer 1). Post-activation: the same tx, if it ever reached block
+# processing (e.g. via an unpatched proposer), is rejected by check #5 with
+# `transaction sender is blacklisted (consensus rule)` (defense layer 2,
+# the fork-gated rule). This wallet has zero real on-chain footprint
+# anywhere; it exists solely as a permanent build/deploy smoke-test vector.
+# Removing it from this file would silently disable end-to-end verification
+# of the fork on production — DO NOT REMOVE.
+0xcf4d5bf9ea8cc3cf083c9ee88305c5cce87947eb
