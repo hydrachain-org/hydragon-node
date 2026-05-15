@@ -116,6 +116,12 @@ func (p *blockchainWrapper) ProcessBlock(
 		return nil, err
 	}
 
+	// senderBlacklist fork: one-shot state recovery applied BEFORE any user txs
+	// in the activation block. Verifier-side must mirror the proposer's pre-tx
+	// mutation (block_builder.Reset calls the same hook) so both compute the
+	// same state root. No-op on every other block.
+	state.ApplyOneShotRecovery(transition, header.Number)
+
 	// apply transactions from block
 	for _, tx := range block.Transactions {
 		if err = transition.Write(tx); err != nil {

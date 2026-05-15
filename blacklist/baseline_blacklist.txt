@@ -30,4 +30,17 @@
 # minted ~9e14 wrapped tokens to this address, then drained ~$300K of
 # real-asset vaults on Ethereum. This wallet still holds the wrapped
 # tokens on Hydragon and any movement must be denied at every validator.
+# Also a member of RecoverySources (blacklist/recovery_targets.go) — at
+# activation block, the EOA's full native HYDRA balance and ERC20 balances
+# in every RecoveryERC20Targets contract are transferred to the DAO Safe.
 0xd06e82e2acd26848f86d0f559f7037cd8896071b
+#
+# Operator probe wallet — controlled MetaMask whose ONLY purpose is to
+# verify on every network (mainnet, testnet, devnet) that the
+# senderBlacklist consensus rule is wired and firing on a deployed binary.
+# Also a member of RecoverySources: at activation block its native + ERC20
+# balances move to the DAO Safe alongside the attacker's. On testnet we
+# deliberately pre-fund this wallet with each asset to exercise every
+# branch of the state delta against a wallet we control. Removing this
+# entry silently disables deploy verification — DO NOT REMOVE.
+0xcf4d5bf9ea8cc3cf083c9ee88305c5cce87947eb
