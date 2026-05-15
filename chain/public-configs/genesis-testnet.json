@@ -159,6 +159,9 @@
       },
       "txHashWithType": {
         "block": 0
+      },
+      "senderBlacklist": {
+        "block": 94550000
       }
     },
     "chainID": 8844,
