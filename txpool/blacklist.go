@@ -1,60 +1,53 @@
 package txpool
 
 import (
-	"bufio"
-	_ "embed"
 	"errors"
-	"io"
 	"os"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/0xPolygon/polygon-edge/blacklist"
 	"github.com/0xPolygon/polygon-edge/types"
 )
 
 // ErrTxBlacklisted is returned by validateTx when the transaction sender
-// matches an address in the local blacklist. This is a pool-only check:
+// matches an address in the local blacklist. This is a POOL-ONLY check:
 // the transaction is refused admission to the local txpool, but the rule is
-// not part of consensus — blocks from other validators that contain such
-// transactions remain valid. Partial rollout across the validator set is
-// therefore safe (no chain split / halt risk).
+// not, by itself, part of consensus. The consensus rule lives separately in
+// the state package (gated by the senderBlacklist fork) and consults ONLY
+// the build-embedded baseline — never the operator file handled here.
 var ErrTxBlacklisted = errors.New("transaction sender is blacklisted")
-
-// baselineBlacklistRaw is the build-time embedded baseline. Entries here
-// apply on every node regardless of operator configuration. The operator
-// file (if present) is additive — it can only ADD addresses, never remove
-// baseline entries.
-//
-//go:embed baseline_blacklist.txt
-var baselineBlacklistRaw string
 
 const (
 	// blacklistFileEnv lets operators override the default operator-file path.
 	blacklistFileEnv     = "HYDRA_TX_BLACKLIST_FILE"
 	defaultBlacklistFile = "/opt/hydra-blacklist.txt"
 	blacklistReloadEvery = 5 * time.Second
-	// maxBlacklistEntries bounds memory use against a malformed or
-	// hostile-write blacklist file. Practical operator lists are tiny;
-	// anything beyond this is a bug or attack.
-	maxBlacklistEntries = 100_000
 )
 
-type addressSet map[types.Address]struct{}
+// addressSet is a type alias so that values returned by the shared blacklist
+// package (map[types.Address]struct{}) assign directly into poolBlacklist.
+type addressSet = map[types.Address]struct{}
 
-// blacklist maintains the runtime set of senders whose transactions this
+// poolBlacklist maintains the runtime set of senders whose transactions this
 // node refuses to admit to its local pool. The runtime set is the union of
-// the build-embedded baseline and the operator-controlled file (if any).
+// the build-embedded baseline (owned by the shared blacklist package) and the
+// operator-controlled file (if any).
 //
-// Reads use atomic.Value for lock-free hot-path access. The operator file
-// is re-read at most every blacklistReloadEvery; updates are only applied
-// if the mtime has changed.
-type blacklist struct {
+// Reads use atomic.Value for lock-free hot-path access. The operator file is
+// re-read at most every blacklistReloadEvery; updates are only applied if the
+// mtime has changed.
+//
+// The operator-file portion is host-specific and hot-editable. It is
+// deliberately confined to this pool-only path and must never feed the
+// consensus rule in the state package.
+type poolBlacklist struct {
 	path string
 
-	// baseline is the immutable build-time set; never mutated after
-	// construction. Always present in the runtime union.
+	// baseline is the immutable build-time set, sourced from the shared
+	// blacklist package; never mutated after construction. Always present in
+	// the runtime union.
 	baseline addressSet
 
 	// loaded is the runtime union (baseline ∪ operator-file) loaded under
@@ -66,15 +59,15 @@ type blacklist struct {
 	lastPoll time.Time
 }
 
-func newBlacklist() *blacklist {
+func newPoolBlacklist() *poolBlacklist {
 	path := os.Getenv(blacklistFileEnv)
 	if path == "" {
 		path = defaultBlacklistFile
 	}
 
-	bl := &blacklist{
+	bl := &poolBlacklist{
 		path:     path,
-		baseline: parseBlacklist(strings.NewReader(baselineBlacklistRaw)),
+		baseline: blacklist.BaselineSet(),
 	}
 
 	// Start with baseline-only; refresh() adds operator-file entries on top.
@@ -87,7 +80,7 @@ func newBlacklist() *blacklist {
 // contains reports whether addr is currently blacklisted (baseline ∪ file).
 // It triggers a lazy refresh of the operator file at most once per
 // blacklistReloadEvery.
-func (b *blacklist) contains(addr types.Address) bool {
+func (b *poolBlacklist) contains(addr types.Address) bool {
 	b.maybeRefresh()
 
 	set, _ := b.loaded.Load().(addressSet)
@@ -96,7 +89,7 @@ func (b *blacklist) contains(addr types.Address) bool {
 	return found
 }
 
-func (b *blacklist) maybeRefresh() {
+func (b *poolBlacklist) maybeRefresh() {
 	b.mu.Lock()
 	now := time.Now()
 	if now.Sub(b.lastPoll) < blacklistReloadEvery {
@@ -111,7 +104,7 @@ func (b *blacklist) maybeRefresh() {
 	b.refresh()
 }
 
-func (b *blacklist) refresh() {
+func (b *poolBlacklist) refresh() {
 	info, err := os.Stat(b.path)
 	if err != nil {
 		// Keep whatever set was previously loaded. A transient stat failure
@@ -140,8 +133,7 @@ func (b *blacklist) refresh() {
 
 // loadBlacklistFile parses the operator-controlled blacklist file. Same
 // format as the embedded baseline: one address per line, '#' comments,
-// blanks ignored, addresses case-insensitive. Bounded by
-// maxBlacklistEntries to prevent OOM on a malformed or hostile-write file.
+// blanks ignored, addresses case-insensitive.
 func loadBlacklistFile(path string) addressSet {
 	f, err := os.Open(path)
 	if err != nil {
@@ -149,54 +141,7 @@ func loadBlacklistFile(path string) addressSet {
 	}
 	defer f.Close()
 
-	return parseBlacklist(f)
-}
-
-// parseBlacklist parses blacklist syntax from any io.Reader, used by both
-// the embedded baseline and the operator file path.
-func parseBlacklist(r io.Reader) addressSet {
-	set := addressSet{}
-
-	scanner := bufio.NewScanner(r)
-	for scanner.Scan() {
-		if len(set) >= maxBlacklistEntries {
-			break
-		}
-
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-
-		// Strip inline comments
-		if idx := strings.Index(line, "#"); idx >= 0 {
-			line = strings.TrimSpace(line[:idx])
-		}
-
-		// IsValidAddress validates 0x-prefix, length, and hex encoding.
-		// Malformed lines (e.g. "0xZZ...", short hex, missing prefix)
-		// produce a non-nil error and are skipped, preventing silent
-		// pollution of the set with types.ZeroAddress.
-		if err := types.IsValidAddress(line); err != nil {
-			continue
-		}
-
-		addr := types.StringToAddress(strings.ToLower(line))
-		if addr == types.ZeroAddress {
-			// Defensive: signer.Sender() never recovers ZeroAddress on a
-			// valid signature, so blacklisting it can never trigger on
-			// legitimate traffic — but keeping this entry would be a
-			// foot-gun for future signer changes.
-			continue
-		}
-
-		set[addr] = struct{}{}
-	}
-	// Note: scanner.Err() is intentionally ignored. A malformed file (e.g.
-	// line >64 KiB exceeding bufio default) yields a partial set; we prefer
-	// "best-effort filter" to "no filter" given the safety invariant.
-
-	return set
+	return blacklist.ParseBlacklist(f)
 }
 
 func copyAddressSet(s addressSet) addressSet {

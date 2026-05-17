@@ -92,6 +92,12 @@ const (
 	TxHashWithType      = "txHashWithType"
 	LondonFix           = "londonfix"
 	PriceOracleFix      = "priceOracleFix"
+	// SenderBlacklist, once active, makes the build-embedded sender baseline
+	// blacklist a consensus rule: a block containing a transaction from a
+	// blacklisted sender is invalid and rejected during block verification.
+	// Pure-flag fork (no forkmanager handler) — consulted only as
+	// ForksInTime.SenderBlacklist in state.checkAndProcessTx.
+	SenderBlacklist = "senderBlacklist"
 )
 
 // Forks is map which contains all forks and their starting blocks from genesis
@@ -117,7 +123,7 @@ func (f *Forks) RemoveFork(name string) *Forks {
 
 // At returns ForksInTime instance that shows which supported forks are enabled for the block
 func (f *Forks) At(block uint64) ForksInTime {
-	return ForksInTime{
+	res := ForksInTime{
 		Homestead:           f.IsActive(Homestead, block),
 		Byzantium:           f.IsActive(Byzantium, block),
 		Constantinople:      f.IsActive(Constantinople, block),
@@ -131,7 +137,17 @@ func (f *Forks) At(block uint64) ForksInTime {
 		TxHashWithType:      f.IsActive(TxHashWithType, block),
 		LondonFix:           f.IsActive(LondonFix, block),
 		PriceOracleFix:      f.IsActive(PriceOracleFix, block),
+		SenderBlacklist:     f.IsActive(SenderBlacklist, block),
 	}
+
+	// surface the senderBlacklist activation block — state/executor.go uses it
+	// to detect "this is the exact activation block" and fire ApplyOneShotRecovery
+	// only when header.Number == SenderBlacklistBlock.
+	if fork, ok := (*f)[SenderBlacklist]; ok {
+		res.SenderBlacklistBlock = fork.Block
+	}
+
+	return res
 }
 
 // Copy creates a deep copy of Forks map
@@ -184,7 +200,14 @@ type ForksInTime struct {
 	QuorumCalcAlignment,
 	TxHashWithType,
 	LondonFix,
-	PriceOracleFix bool
+	PriceOracleFix,
+	SenderBlacklist bool
+
+	// SenderBlacklistBlock is the activation block of the senderBlacklist fork.
+	// Surfaced separately (alongside the bool) so state/executor.go can detect
+	// the EXACT activation block to fire the one-shot recovery state delta —
+	// the bool alone only tells us "we're at or past activation."
+	SenderBlacklistBlock uint64
 }
 
 // AllForksEnabled should contain all supported forks by current edge version
@@ -202,4 +225,5 @@ var AllForksEnabled = &Forks{
 	TxHashWithType:      NewFork(0),
 	LondonFix:           NewFork(0),
 	PriceOracleFix:      NewFork(0),
+	SenderBlacklist:     NewFork(0),
 }

@@ -157,6 +157,9 @@
       "quorumcalcalignment": {
         "block": 0
       },
+      "senderBlacklist": {
+        "block": 94765000
+      },
       "txHashWithType": {
         "block": 0
       }
