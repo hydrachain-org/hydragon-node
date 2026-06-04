@@ -5,7 +5,7 @@ We are working on a fork of the core contracts, so the submodule is update the w
 Commands used for the module update:
 
 ```
-git submodule set-url core-contracts https://github.com/Hydra-Chain/hydragon-core-contracts.git
+git submodule set-url core-contracts https://github.com/hydrachain-org/hydragon-core-contracts.git
 ```
 
 ```
