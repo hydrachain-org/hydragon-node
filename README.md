@@ -27,7 +27,7 @@ To begin your journey as a validator, you'll first need to obtain the software f
 
 - #### Executable
 
-Download the executable for the Hydragon Node directly from [Github Releases](https://github.com/Hydra-Chain/hydragon-node/releases/latest).
+Download the executable for the Hydragon Node directly from [Github Releases](https://github.com/hydrachain-org/hydragon-node/releases/latest).
 After downloading, unzip the file. The extracted folder, named identically to the zip file, contains the `hydra` executable. To enhance convenience, you may want to move this executable to your system's bin directory to run it from anywhere.
 
 - #### Build from source
@@ -38,7 +38,7 @@ After downloading, unzip the file. The extracted folder, named identically to th
 
 ##### Build steps
 
-1. Clone the node source code from our [Github Repository](https://github.com/Hydra-Chain/hydragon-node/tree/prod) or download it from from our [latest release](https://github.com/Hydra-Chain/hydragon-node/releases/latest).
+1. Clone the node source code from our [Github Repository](https://github.com/hydrachain-org/hydragon-node/tree/prod) or download it from from our [latest release](https://github.com/hydrachain-org/hydragon-node/releases/latest).
 
 **Note!** Please make sure to check out the `prod` branch if you have opted to clone the repository.
 
@@ -130,7 +130,7 @@ For more details on available commands and their usage, you can append the `--he
 
 The genesis.json file is crucial, containing details about the genesis block and node configurations.
 **Important: Do not alter this file to avoid potential loss of funds.**
-In the new releases, the genesis file is built into the hydra executable and as such does not need a custom Genesis file. For visibility, you can find the latest HydraChain genesis file at the following location https://github.com/Hydra-Chain/hydragon-node/blob/testnet/chain/public-configs/genesis-mainnet.json.
+In the new releases, the genesis file is built into the hydra executable and as such does not need a custom Genesis file. For visibility, you can find the latest HydraChain genesis file at the following location https://github.com/hydrachain-org/hydragon-node/blob/testnet/chain/public-configs/genesis-mainnet.json.
 
 #### Secrets Configuration File
 
@@ -272,7 +272,7 @@ hydra hydragon commission --data-dir ./node-secrets --claim true --jsonrpc http:
 
 ### Ban Validator
 
-To reduce the risk of stalling caused by validators experiencing temporary issues or acting maliciously, we’ve implemented an ejection and ban mechanism. Anyone who recongizes a suspicious activity, and the rules are met, can execute the ban process. Below is an outline of how the system works (specific conditions are detailed in our [genesis contracts](https://github.com/Hydra-Chain/hydragon-core-contracts)):
+To reduce the risk of stalling caused by validators experiencing temporary issues or acting maliciously, we’ve implemented an ejection and ban mechanism. Anyone who recongizes a suspicious activity, and the rules are met, can execute the ban process. Below is an outline of how the system works (specific conditions are detailed in our [genesis contracts](https://github.com/hydrachain-org/hydragon-core-contracts)):
 
 1. **Initial Ejection**: If your validator stops proposing or participating in consensus whether due to hardware failure, software issues, or malicious intent—the ban procedure will be initiated. The validator will be ejected, allowing time for recovery. If no action is taken, a ban may follow. The threshold to trigger this process is initially set at 18,000 blocks (~2 hours), depending on block creation speed.
 2. **Ban Procedure**: After ejection, you can rejoin by resolving the issue and running the appropriate command (explained [below](#re-activate)). However, if you fail to act within the final threshold (259,200 seconds or ~72 hours), your validator will be permanently banned. This will result in a penalty (currently 1,000 HYDRA) , of which 700 HYDRA will be burned and a small reward for the reporter (currently 300 HYDRA; applied only if ban is executed by reporter different than the Governance), and the remaining funds being prepared for withdrawal.
